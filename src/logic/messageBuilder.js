@@ -14,6 +14,7 @@ const POOL_LABELS = {
 
 function buildEventEmbed(event) {
   const totalParticipants = Object.keys(event.participants).length;
+  const emojis = event.emojis || config.emojis;
 
   const embed = new EmbedBuilder()
     .setTitle(event.title)
@@ -22,7 +23,7 @@ function buildEventEmbed(event) {
     .addFields({ name: '👥 Total Participants', value: String(totalParticipants), inline: false });
 
   for (const pool of REAL_POOLS) {
-    const emoji = config.emojis[pool];
+    const emoji = emojis[pool];
     const limit = event.poolLimits[pool] ?? '∞';
     const members = event.pools[pool];
     const memberList = members.length > 0
@@ -43,7 +44,7 @@ function buildEventEmbed(event) {
       .join('\n');
 
     embed.addFields({
-      name: `${config.emojis.donkey} ${POOL_LABELS.donkey} (${donkeyMembers.length})`,
+      name: `${emojis.donkey} ${POOL_LABELS.donkey} (${donkeyMembers.length})`,
       value: donkeyList,
       inline: false,
     });

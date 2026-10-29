@@ -7,13 +7,16 @@
   "scripts": {
     "start": "node src/main.js",
     "deploy": "node src/commands/deploy.js",
-    "build": "node build.js"
+    "build": "node build.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "pkg": {
     "targets": [
       "node18-win-x64"
     ],
     "assets": [
+      "src/desktop/TrayApp.cs",
+      "icon.ico",
       "node_modules/discord.js/src/**/*",
       "node_modules/@discordjs/**/*",
       "node_modules/undici/**/*"

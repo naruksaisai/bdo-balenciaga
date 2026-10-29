@@ -7,7 +7,13 @@ require('dotenv').config();
 
 const BAKED = 'src/baked-config.js';
 
-// All env vars the app reads — only bake non-empty values
+// All env vars the app reads — only bake non-empty values.
+// The four Discord connection values are fixed per build and never editable in
+// the app. The rest are defaults the user can override in the desktop UI.
+//
+// NOTE: baked values (including DISCORD_BOT_TOKEN) are stored in plain form
+// inside the exe. Anyone with the file can extract them — only share a build
+// with people you would trust with the bot token itself.
 const KNOWN_VARS = [
   'DISCORD_BOT_TOKEN',
   'CLIENT_ID',
@@ -100,14 +106,16 @@ try {
     }
   }
 
-  // Copy icon.ico next to the exe so the tray can load it at runtime
-  const iconSrc = require('path').join(__dirname, 'icon.ico');
-  const iconDst = require('path').join('dist', 'icon.ico');
-  if (fs.existsSync(iconSrc)) {
-    fs.copyFileSync(iconSrc, iconDst);
-    console.log('✅ Copied icon.ico → dist/');
-  } else {
-    console.warn('⚠️  icon.ico not found in project root — tray will use fallback icon');
+  // Smoke-test the packaged runtime (node18, reduced ICU) — it can crash on code
+  // that works fine in the dev Node version.
+  if (platform === 'win') {
+    try {
+      execSync(`"${require('path').join('dist', 'bdo-raid-helper.exe')}" --self-test`, { stdio: 'inherit' });
+      console.log('✅ Packaged exe self-test passed');
+    } catch (e) {
+      console.error(`\n❌ Packaged exe self-test failed (exit ${e.status}). Do not ship this build.`);
+      process.exitCode = 1;
+    }
   }
 
   console.log('\n✅ Build complete — binaries are in dist/');

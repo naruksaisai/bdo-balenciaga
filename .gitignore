@@ -4,3 +4,4 @@ config.json
 state.json
 dist/
 src/baked-config.js
+.data/
