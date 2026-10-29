@@ -1,152 +1,60 @@
-You are modifying the existing repository `saksit-namhung/bdo-raid-helper`.
+Change the implementation to a native Windows desktop application, not a browser-based control panel.
 
-Current state:
-- The project is a packaged Windows `.exe`.
-- The app already runs without interactive setup.
-- It is intended to run without a visible terminal or taskbar window.
-- It is supposed to behave like a background app and show in the Windows notification area / hidden icons section.
-- It is also intended to support starting with Windows.
+Desktop UI
+- Opening the EXE manually must show an application window.
+- Prefer extending the existing PowerShell/WinForms integration if it can reliably support the required controls. Avoid introducing a large framework unnecessarily.
+- Do not launch a browser, host a local HTTP server, or require firewall exceptions or administrator privileges.
+- Provide:
+  - Hosting ON/OFF toggle.
+  - Hosting status and this instance’s role: Leader / Standby / Off.
+  - Automatically refreshed active-node count, including unavailable/stale indicators.
+  - Automatic-event settings with Save and Cancel.
+  - Emoji selectors with previews, built-in choices, pasted Unicode emoji, and supported Discord custom emojis.
+  - Clear validation errors and operation feedback.
 
-Current problems to fix:
-1. After first run, there is no tray / hidden icon visible in the bottom-right Windows notification area.
-2. There is nothing clearly visible in Task Manager for the app process.
-3. I sometimes have to close it using shell commands.
-4. Even after closing it, a `node` process may still remain running although the bot is already offline.
-5. I want the app to appear properly in:
-   - the Windows hidden icons / system tray area
-   - Task Manager
-   - Windows Startup apps
-6. I want users to be able to toggle startup on/off from Windows Startup Apps if possible.
-7. I want closing the package to terminate the real runtime process completely.
-8. I want you to actually inspect the repo and make concrete repo-specific changes.
-9. I want logging or a debug trace written into the project directory in some persistent form so behavior can be diagnosed after packaging and runtime testing.
+Window and tray behavior
+- Closing the window hides it to the tray without changing hosting state.
+- Tray actions: Open, Hosting ON/OFF, and Exit.
+- Launching the EXE again brings the existing window forward without starting another instance.
+- Windows auto-start runs minimized to the tray without opening the window.
+- Hosting ON enables Windows sign-in startup; OFF disables it while leaving the desktop UI available.
+- Persist the hosting choice and default to OFF on first launch.
 
-Critical requirements:
-- Do not give a generic answer.
-- Inspect the project structure and existing startup flow first.
-- Make the solution concrete for this repository and its current packaging approach.
-- Keep the bot logic intact.
-- Minimize unnecessary refactors.
-- Focus on Windows packaged `.exe` behavior.
-- Be production-minded.
+Configuration
+- Keep Discord connection values embedded through the existing build process:
+  DISCORD_BOT_TOKEN, CLIENT_ID, AUTO_EVENT_CHANNEL_ID,
+  COORDINATION_CHANNEL_ID.
+- Do not expose editable Discord connection fields.
+- Never send the bot token to the UI or include it in logs or errors.
+- Document that embedding a token in an EXE does not prevent extraction.
 
-What I want the application to do:
-A. Tray / notification area behavior
-- The packaged app must show a real tray / notification area icon in Windows.
-- It should be visible in the bottom-right hidden icons area.
-- It must provide at least:
-  - status indication
-  - exit / quit action
-- If practical, include:
-  - restart bot
-  - open logs folder
-  - enable/disable startup
-- The tray implementation must be robust enough that the icon is actually registered and persists while the app is running.
+Allow users to edit and persist:
+- AUTO_EVENT_SCHEDULE
+- AUTO_EVENT_TITLE
+- AUTO_EVENT_DESCRIPTION
+- AUTO_EVENT_MAINBALL_MAX
+- AUTO_EVENT_DEF_TEAM_MAX
+- AUTO_EVENT_COMMANDER_MAX
+- AUTO_EVENT_SHAI_MAX
+- AUTO_EVENT_FLEX_MAX
 
-B. Process visibility / lifecycle
-- The app should appear as a real running application/process in Task Manager in a sensible way for the packaged executable.
-- Closing the app from the tray or any intended exit path must terminate the actual runtime process completely.
-- No orphaned `node` process should remain after exit.
-- Review all intervals, Discord client connections, child processes, event loops, tray handles, and shutdown paths.
-- Add a proper graceful shutdown flow:
-  - clear timers/intervals
-  - destroy the tray icon
-  - destroy/close the Discord client cleanly if needed
-  - stop any background watchers or child processes
-  - exit the process only after cleanup
-- Also ensure forced exit fallback if graceful shutdown hangs.
+Retain the previous requirements for validation, configuration precedence,
+per-day schedule preservation, safe saves, future-event updates, emoji
+compatibility with existing events, graceful hosting shutdown, and accurate
+node monitoring while hosting is OFF.
 
-C. Windows startup integration
-- The packaged app must register correctly as a startup app for the current user.
-- It should show in Windows Startup Apps so the user can toggle it on/off there if possible.
-- Choose the best practical Windows approach for this repo and explain why:
-  - HKCU Run registry key
-  - Startup folder shortcut
-  - other practical Windows-native method
-- Use the packaged executable path (`process.execPath`) where appropriate.
-- Avoid requiring admin rights.
+Desktop integration
+- Use validated, narrowly scoped IPC between the desktop UI and Node.js.
+- Keep Discord credentials and hosting logic in the Node.js backend.
+- Handle UI/backend failures visibly without leaving orphaned hosting processes.
+- Preserve the documented PowerShell encoding and Windows shutdown constraints.
+- Store mutable user settings in a per-user writable application-data directory so the app also works from protected installation folders without elevation.
+- Migrate existing settings safely where needed.
+- Package all required UI resources with the Windows application.
 
-D. Logging / diagnostics
-- Add persistent logging for startup, tray initialization, startup registration, bot online/offline status, and shutdown.
-- Write logs into the project directory or another repo-appropriate predictable local path.
-- If “project directory” is unsafe for packaged startup launches, explain and choose a stable path, but also make it easy to find.
-- Log enough detail to debug:
-  - app launch
-  - tray icon creation success/failure
-  - Discord login result
-  - shutdown path
-  - startup registration result
-  - process exit
-- If you create a log file, document its location.
+Remove browser-specific requirements, including HTTP endpoints, browser
+authentication, CSRF handling, ports, and browser-launch behavior.
 
-IMPORTANT LOGGING CONSTRAINTS:
-- Do NOT implement unbounded logging.
-- Keep disk usage small.
-- Prefer a lightweight logging approach over a full logging framework unless a dependency is clearly justified.
-- Only log important lifecycle and error events, not noisy heartbeat-style operational spam.
-- Avoid logging repeated sync/status messages unless they are errors or state transitions.
-- Implement log rotation or pruning.
-- Keep only a small number of recent log files, or enforce a small total size cap.
-- If using a single log file, cap its size and rotate it safely.
-- Do not keep logs forever.
-- Choose conservative defaults suitable for a small packaged utility.
-- Explicitly state the retention policy.
-- Prefer human-readable plain text logs.
-- Do not log secrets such as bot token or sensitive env values.
-
-Suggested logging policy:
-- Log only startup, shutdown, startup registration changes, tray init, major bot online/offline events, and errors.
-- Rotate logs when size exceeds a modest threshold such as 256 KB to 1 MB.
-- Keep only the latest 3 to 5 log files.
-- Prune old logs automatically on startup.
-- Make sure logging failures never crash the app.
-
-E. Testing / verification
-- Do not just propose code. Reason through how to test the actual packaged behavior on Windows.
-- Verify the code paths for:
-  - first launch
-  - tray icon present
-  - process visible
-  - startup registration
-  - user disabling startup from Windows Startup Apps
-  - clean exit with no orphan process
-- If full runtime testing cannot literally be performed in your environment, still add repo-side diagnostics and explicit validation steps.
-- I want the implementation to include logs or other artifacts that help verify what happened.
-
-Constraints:
-- Do not convert the app to Electron unless absolutely necessary and strongly justified.
-- Prefer the smallest realistic dependency footprint.
-- Keep the existing Node.js Discord bot behavior intact.
-- Do not reintroduce interactive setup.
-- Be careful with packaged executable path handling and current working directory assumptions.
-- Inspect any existing use of `process.cwd()` and determine whether that causes problems for packaged startup or startup-launch context.
-- If needed, move runtime files to a more stable per-user path and explain exactly why.
-- If the build/package process must change, show exact modifications.
-
-Repository-specific tasks:
-1. Inspect the actual startup entry point and lifecycle in this repo.
-2. Identify why the tray icon may not currently appear.
-3. Identify why the process may remain alive after bot shutdown.
-4. Identify what changes are needed so the app is visible/manageable in Windows as expected.
-5. Implement the fixes with exact code changes.
-
-Deliverables:
-1. A short repo-aware diagnosis of the likely causes.
-2. A concrete implementation plan.
-3. Exact code changes for all modified files.
-4. Any new files needed, fully written out.
-5. Any package/build config changes.
-6. A short Windows packaging/testing checklist.
-7. A note explaining where logs are written.
-8. Make sure the implementation adds persistent logging in the repo/runtime path.
-9. Explicitly document the log-retention / log-rotation strategy and why it keeps log size small.
-
-Important:
-- Be explicit about shutdown handling.
-- Be explicit about how the tray icon lifecycle is managed.
-- Be explicit about how startup registration is implemented.
-- Be explicit about how to guarantee the actual process exits.
-- Be explicit about how log growth is controlled.
-- Keep the solution practical for `saksit-namhung/bdo-raid-helper`.
-
-Do not answer at a high level. Produce a concrete, implementation-ready response based on this repository.
+Implement the complete desktop workflow, add focused tests, update related
+documentation, and distinguish verified behavior from Windows-specific
+behavior that could not be tested.

@@ -38,15 +38,17 @@ module.exports = {
       participants: {},
     };
 
+    const emojis = config.emojis;
+    tempEvent.emojis = emojis;
     const embed = buildEventEmbed(tempEvent);
     const message = await interaction.editReply({ embeds: [embed] });
 
     createEvent(message.id, interaction.channelId, interaction.guildId, {
-      title, description, poolLimits,
+      title, description, poolLimits, emojis,
     });
 
     for (const pool of ['mainball', 'def-team', 'commander', 'shai', 'flex']) {
-      await message.react(config.emojis[pool]);
+      await message.react(emojis[pool]);
     }
   },
 };

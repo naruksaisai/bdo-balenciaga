@@ -19,8 +19,6 @@ if not exist "node_modules" (
   )
 )
 
-:loop
+rem Opens the desktop window (tray app). No restart loop: choosing Exit in the
+rem tray must stay exited. Hosting ON/OFF is controlled from the window.
 node src/main.js
-echo Bot stopped. Restarting in 5 seconds... (Press Ctrl+C to quit)
-timeout /t 5 /nobreak >nul
-goto loop

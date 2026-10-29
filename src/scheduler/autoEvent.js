@@ -13,7 +13,7 @@ let currentAutoEventMsgId = null;
 let currentCountdownMsg = null;
 let currentTimer = null;
 let currentPreTimer = null;
-let _client = null; // set once in scheduleAutoEvent, reused by restart
+let _client = null; // set by startAutoEvent, cleared by stopAutoEvent
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -114,25 +114,31 @@ async function runAutoEvent(client, pools) {
     return;
   }
 
+  // Snapshot the emojis so this card keeps working if they change later.
+  const emojis = config.emojis;
   const tempEvent = {
     title: autoEvent.title,
     description: autoEvent.description,
     poolLimits,
+    emojis,
     pools: { mainball: [], 'def-team': [], commander: [], shai: [], flex: [], donkey: [] },
     participants: {},
   };
 
   const embed = buildEventEmbed(tempEvent);
   const message = await channel.send({ embeds: [embed] });
+  // Hosting was turned off while the card was being posted.
+  if (_client !== client) return;
 
   createEvent(message.id, channel.id, channel.guildId, {
     title: autoEvent.title,
     description: autoEvent.description,
     poolLimits,
+    emojis,
   });
 
   for (const pool of ['mainball', 'def-team', 'commander', 'shai', 'flex']) {
-    await message.react(config.emojis[pool]);
+    await message.react(emojis[pool]);
   }
 
   if (currentCountdownMsg) {
@@ -160,17 +166,38 @@ function scheduleTick() {
 
   if (delay > PRE_TRANSITION_MS) {
     currentPreTimer = setTimeout(async () => {
-      await preTransition(_client, PRE_TRANSITION_MS);
+      if (_client) await preTransition(_client, PRE_TRANSITION_MS);
     }, delay - PRE_TRANSITION_MS);
   }
 
   currentTimer = setTimeout(async () => {
-    await runAutoEvent(_client, pools);
-    scheduleTick();
+    if (!_client) return;
+    try {
+      await runAutoEvent(_client, pools);
+    } catch (err) {
+      console.error('[AutoEvent] Failed to create event:', err.message);
+    }
+    if (_client) scheduleTick();
   }, delay);
 }
 
-function scheduleAutoEvent(client) {
+function clearTimers() {
+  if (currentTimer) clearTimeout(currentTimer);
+  if (currentPreTimer) clearTimeout(currentPreTimer);
+  currentTimer = null;
+  currentPreTimer = null;
+}
+
+// Re-plan the next run whenever the per-day schedule changes, so future events
+// always use the newest time and pool limits.
+function onScheduleChange() {
+  if (!_client) return;
+  clearTimers();
+  console.log('[AutoEvent] Schedule updated — restarting scheduler.');
+  scheduleTick();
+}
+
+function startAutoEvent(client) {
   if (!config.autoEvent.enabled) {
     console.log('[AutoEvent] Scheduler not started: AUTO_EVENT_ENABLED is not set to true');
     return;
@@ -184,18 +211,18 @@ function scheduleAutoEvent(client) {
     return;
   }
 
+  stopAutoEvent();
   _client = client;
-
-  scheduleConfig.on('change', () => {
-    if (currentTimer) clearTimeout(currentTimer);
-    if (currentPreTimer) clearTimeout(currentPreTimer);
-    currentTimer = null;
-    currentPreTimer = null;
-    console.log('[AutoEvent] Schedule updated — restarting scheduler.');
-    scheduleTick();
-  });
-
+  scheduleConfig.on('change', onScheduleChange);
   scheduleTick();
 }
 
-module.exports = { scheduleAutoEvent };
+// Called when hosting turns OFF or this node loses leadership.
+function stopAutoEvent() {
+  scheduleConfig.off('change', onScheduleChange);
+  clearTimers();
+  _client = null;
+  currentCountdownMsg = null;
+}
+
+module.exports = { startAutoEvent, stopAutoEvent };

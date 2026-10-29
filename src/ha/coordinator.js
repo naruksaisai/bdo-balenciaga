@@ -5,12 +5,13 @@ const { REST, Routes, AttachmentBuilder } = require('discord.js');
 const config = require('../config');
 const { exportState, importState } = require('../state/eventStore');
 const scheduleConfig = require('../scheduler/scheduleConfig');
-const BASE_DIR = require('../utils/baseDir');
+const { DATA_DIR } = require('../utils/dataDir');
+const { writeJsonAtomic } = require('../utils/safeWrite');
+const { isPresenceMessage, LEADER_TIMEOUT_MS } = require('./nodeStatus');
 
-const STATE_FILE = path.join(BASE_DIR, 'state.json');
+const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SYNC_INTERVAL_MS  = 15 * 60 * 1000; // 15 min  — leader broadcast cadence
 const HEALTH_CHECK_MS   =  2 * 60 * 1000; //  2 min  — standby liveness poll cadence
-const LEADER_TIMEOUT_MS = 20 * 60 * 1000; // 20 min  — must be > SYNC_INTERVAL
 const NODE_STALE_MS     = LEADER_TIMEOUT_MS * 2;
 
 // Short-lived cache for channel message fetches — collapses the 4+ separate
@@ -27,17 +28,26 @@ class Coordinator extends EventEmitter {
   constructor() {
     super();
     this.isLeader = false;
+    this._running = false;          // false once shutdown() starts; guards async callbacks
     this._syncTimer = null;
     this._presenceMessageId = null; // this node's heartbeat message in coord channel
     this._statusMessageId = null;   // standalone status message posted when no state msg existed
     this._stateMessageId = null;    // last broadcast state message — cached so shutdown can PATCH without a fetch round-trip
-    this._rest = new REST().setToken(config.token);
+    this._rest = new REST();
+  }
+
+  get running() {
+    return this._running;
   }
 
   // ── File helpers ────────────────────────────────────────────────────────────
 
   _saveLocally(state) {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+    try {
+      writeJsonAtomic(STATE_FILE, state);
+    } catch (err) {
+      console.warn('[Node] Could not write state.json:', err.message);
+    }
   }
 
   _loadLocally() {
@@ -186,7 +196,13 @@ class Coordinator extends EventEmitter {
 
   // ── Startup ──────────────────────────────────────────────────────────────────
 
+  // Safe to call again after shutdown() — hosting can be toggled at runtime.
   async start() {
+    this._running = true;
+    this.isLeader = false;
+    this._rest.setToken(config.token);
+    this._invalidateMsgCache();
+
     if (!config.coordinationChannelId) {
       console.log('[Node] No COORDINATION_CHANNEL_ID set — starting as sole leader.');
       this._becomeLeader();
@@ -204,12 +220,14 @@ class Coordinator extends EventEmitter {
     }
 
     const ageMs = await this._getLeaderAgeMs();
+    if (!this._running) return;
 
     if (ageMs < LEADER_TIMEOUT_MS) {
       const ageMin = Math.floor(ageMs / 60000);
       console.log(`[Standby] Leader active (last sync ${ageMin}m ago). Running in standby.`);
       await this._syncFromCoordChannel().catch(() => {});
       this._runStandby();
+      if (this._running) this.emit('role', 'standby');
     } else {
       console.log('[Node] No active leader found. Claiming leadership…');
       // Recover whatever state exists in the coord channel before taking over so
@@ -247,10 +265,12 @@ class Coordinator extends EventEmitter {
   }
 
   _runStandby() {
+    if (!this._running) return;
     let lastSyncAt = Date.now();
 
     this._syncTimer = setInterval(async () => {
       const ageMs = await this._getLeaderAgeMs().catch(() => Infinity);
+      if (!this._running) return;
 
       if (ageMs >= LEADER_TIMEOUT_MS) {
         clearInterval(this._syncTimer);
@@ -267,6 +287,7 @@ class Coordinator extends EventEmitter {
           `[Standby] Leader offline! Waiting ${Math.floor(jitterMs / 1000)}s before claiming…`
         );
         await new Promise((r) => setTimeout(r, jitterMs));
+        if (!this._running) return;
 
         const ageAfter = await this._getLeaderAgeMs().catch(() => Infinity);
         if (ageAfter < LEADER_TIMEOUT_MS) {
@@ -286,9 +307,11 @@ class Coordinator extends EventEmitter {
   }
 
   _becomeLeader() {
+    if (!this._running) return;
     this.isLeader = true;
     this._deletePresence().catch(() => {});
     console.log(`[Leader] This node is now the leader`);
+    this.emit('role', 'leader');
     this.emit('promote');
   }
 
@@ -302,6 +325,9 @@ class Coordinator extends EventEmitter {
   //   • Sending attachments: [] strips the state.json file so future nodes'
   //     _findStateMessage() returns null and they claim leadership immediately.
   async shutdown() {
+    const wasRunning = this._running;
+    this._running = false;
+    this.isLeader = false;
     if (this._syncTimer) {
       clearInterval(this._syncTimer);
       this._syncTimer = null;
@@ -312,7 +338,7 @@ class Coordinator extends EventEmitter {
       this._client = null;
     }
 
-    if (!config.coordinationChannelId) return;
+    if (!config.coordinationChannelId || !wasRunning) return;
 
     const offlineContent = [
       '🔴 **No active node** — host shut down',
@@ -331,6 +357,7 @@ class Coordinator extends EventEmitter {
           this._deletePresence().catch(() => {}),
         ]);
         this._invalidateMsgCache();
+        this._stateMessageId = null;
         console.log('[Node] State message marked offline.');
         return;
       }
@@ -358,6 +385,7 @@ class Coordinator extends EventEmitter {
   }
 
   async startLeaderSync(client) {
+    if (!this._running) return;
     this._client = client;
 
     // Clean up any standalone status message we posted before the Discord client
@@ -370,6 +398,7 @@ class Coordinator extends EventEmitter {
     }
 
     await this._broadcastState(client).catch(console.error);
+    if (!this._running) return;
 
     this._syncTimer = setInterval(() => {
       this._broadcastState(client).catch(console.error);
@@ -383,6 +412,7 @@ class Coordinator extends EventEmitter {
   }
 
   async _broadcastState(client) {
+    if (!this._running) return;
     const state = {
       syncedAt: Date.now(),
       leaderId: instanceId,
@@ -413,11 +443,13 @@ class Coordinator extends EventEmitter {
       await msg.delete().catch(() => {});
     }
 
-    // Count standby nodes: fresh bot messages without attachments
+    // Count standby nodes: presence heartbeats refreshed within the leader
+    // timeout (same rule the desktop node monitor uses). Status cards are not nodes.
     const standbyCnt = existing.filter((m) =>
       m.author.id === client.user.id &&
       m.attachments.size === 0 &&
-      (Date.now() - (m.editedTimestamp ?? m.createdTimestamp)) < NODE_STALE_MS
+      isPresenceMessage(m.content) &&
+      (Date.now() - (m.editedTimestamp ?? m.createdTimestamp)) < LEADER_TIMEOUT_MS
     ).size;
     const nodeCount = standbyCnt + 1; // +1 for this leader node
 
@@ -426,6 +458,7 @@ class Coordinator extends EventEmitter {
       { name: 'state.json' }
     );
 
+    if (!this._running) return;
     const sent = await channel.send({
       content: [
         `🟢 **Leader:** \`${instanceId}\``,
