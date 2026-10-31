@@ -1,6 +1,6 @@
 @echo off
-title BDO Raid Helper
-echo Starting BDO Raid Helper...
+title BDO Balenciaga
+echo Starting BDO Balenciaga...
 
 if not exist ".env" (
   echo ERROR: .env file not found.

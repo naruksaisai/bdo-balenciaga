@@ -1,4 +1,4 @@
-// BDO Raid Helper desktop UI (tray icon + main window).
+// BDO Balenciaga desktop UI (tray icon + main window).
 //
 // Compiled at runtime by PowerShell 5.1 Add-Type (see uiProcess.js), which uses
 // the .NET Framework C# 5 compiler: no string interpolation, no ?. operator, no
@@ -22,7 +22,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-namespace BdoRaidHelper
+namespace BdoBalenciaga
 {
     public static class UiApp
     {
@@ -169,7 +169,7 @@ namespace BdoRaidHelper
 
         public TrayForm()
         {
-            Text = "BDO Raid Helper";
+            Text = "BDO Balenciaga";
             ShowInTaskbar = false;
             FormBorderStyle = FormBorderStyle.FixedToolWindow;
             WindowState = FormWindowState.Minimized;
@@ -411,7 +411,7 @@ namespace BdoRaidHelper
             _menu.Items.Add(_exitItem);
 
             _tray = new NotifyIcon();
-            _tray.Text = "BDO Raid Helper";
+            _tray.Text = "BDO Balenciaga";
             _tray.Icon = new Icon(_icon, SystemInformation.SmallIconSize);
             _tray.ContextMenuStrip = _menu;
             _tray.DoubleClick += delegate { ShowWindow(); };
@@ -484,7 +484,7 @@ namespace BdoRaidHelper
             if (_tray != null)
             {
                 ToolTipIcon icon = kind == Feedback.Error ? ToolTipIcon.Error : kind == Feedback.Warning ? ToolTipIcon.Warning : ToolTipIcon.Info;
-                _tray.ShowBalloonTip(5000, "BDO Raid Helper", text, icon);
+                _tray.ShowBalloonTip(5000, "BDO Balenciaga", text, icon);
             }
         }
 
@@ -507,7 +507,7 @@ namespace BdoRaidHelper
         {
             if (_trayHintShown || _tray == null) return;
             _trayHintShown = true;
-            _tray.ShowBalloonTip(4000, "BDO Raid Helper",
+            _tray.ShowBalloonTip(4000, "BDO Balenciaga",
                 "Still running in the system tray. Hosting was not changed. Use Exit in the tray menu to quit.",
                 ToolTipIcon.Info);
         }
@@ -560,10 +560,10 @@ namespace BdoRaidHelper
             _quitting = true;
             try { if (_tray != null) _tray.Visible = false; } catch { }
             MessageBox.Show(
-                "The BDO Raid Helper background process stopped unexpectedly, so hosting is not running on this PC.\r\n\r\n" +
-                "Start BDO Raid Helper again to continue." +
+                "The BDO Balenciaga background process stopped unexpectedly, so hosting is not running on this PC.\r\n\r\n" +
+                "Start BDO Balenciaga again to continue." +
                 (_logPath.Length > 0 ? "\r\n\r\nDetails are in the log file:\r\n" + _logPath : ""),
-                "BDO Raid Helper", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                "BDO Balenciaga", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Quit();
         }
 
@@ -657,7 +657,7 @@ namespace BdoRaidHelper
             _maxRoles = maxRoles;
             _errors.BlinkStyle = ErrorBlinkStyle.NeverBlink;
 
-            Text = lite ? "BDO Raid Helper (Lite)" : "BDO Raid Helper";
+            Text = lite ? "BDO Balenciaga (Lite)" : "BDO Balenciaga";
             Icon = icon;
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Font;
@@ -1151,7 +1151,7 @@ namespace BdoRaidHelper
         {
             if (_app.HostingEnabled && MessageBox.Show(this,
                     "Exit stops hosting on this PC until you open the app again or sign in to Windows.\r\n\r\nExit now?",
-                    "Exit BDO Raid Helper", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                    "Exit BDO Balenciaga", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _app.RequestExit();
         }
 

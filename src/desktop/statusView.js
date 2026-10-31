@@ -131,7 +131,7 @@ function buildStatusView({ hosting, hostingEnabled, connection, monitor, autoEve
     hosting: h,
     nodes: n,
     notices: notices(connection),
-    tooltip: `BDO Raid Helper - Hosting ${h.label}${roleSuffix}`,
+    tooltip: `BDO Balenciaga - Hosting ${h.label}${roleSuffix}`,
     menuStatus: `Hosting ${h.label} · ${h.roleLabel} · ${n.count} active node(s)`,
   };
 }

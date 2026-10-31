@@ -142,7 +142,7 @@ class Hosting extends EventEmitter {
 
     client.once('ready', async () => {
       if (gen !== this._gen) return;
-      console.log(`✅ BDO Raid Helper online as ${client.user.tag}`);
+      console.log(`✅ BDO Balenciaga online as ${client.user.tag}`);
       this._set({ state: 'running', role: 'leader', detail: `Hosting as ${client.user.tag}.`, error: null });
       await this._coordinator.startLeaderSync(client);
       if (gen === this._gen) this._autoEvent.startAutoEvent(client);

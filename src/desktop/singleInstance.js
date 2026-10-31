@@ -9,7 +9,7 @@ const crypto = require('crypto');
 function defaultPipeName() {
   const who = `${process.env.USERDOMAIN || ''}\\${os.userInfo().username}|${os.homedir()}`;
   const id = crypto.createHash('sha256').update(who.toLowerCase()).digest('hex').slice(0, 16);
-  return `\\\\.\\pipe\\bdo-raid-helper-${id}`;
+  return `\\\\.\\pipe\\bdo-balenciaga-${id}`;
 }
 
 const COMMANDS = new Set(['show', 'ping']);

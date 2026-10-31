@@ -1,4 +1,4 @@
-# BDO Raid Helper — orientation for Claude
+# BDO Balenciaga — orientation for Claude
 
 Windows desktop app (WinForms window + tray) wrapping a Discord bot for Black Desert Online raid signups.
 Node.js + discord.js backend, packaged with `@yao-pkg/pkg` to a GUI-subsystem `.exe`. The UI is C#
@@ -16,7 +16,7 @@ compiled at runtime by Windows PowerShell 5.1 `Add-Type` — no extra framework.
 | [src/settings/](src/settings/) | `schema.js` (keys, validation, precedence — pure; per-role `*_MAX`/`*_EMOJI` keys only seed roles), `roles.js` (role list validation, key slugs, repair — pure), `settingsStore.js` (`settings.json`, hosting choice), `environment.js` (baked/env/.env/legacy config.json), `migrate.js`, `effects.js` (what a saved change does), `emojiCheck.js` (custom emoji usable by the bot?). |
 | [src/desktop/](src/desktop/) | `uiProcess.js` (spawns PS, bootstrap, framing), `TrayApp.cs` (the whole UI), `ipc.js` (message whitelist), `controller.js` (UI requests → backend), `statusView.js` (display text), `nodeMonitor.js`, `singleInstance.js`, `autostart.js`, `app.js` (UI supervision/restart). |
 | [src/scheduler/](src/scheduler/) | `scheduleConfig.js` (per-day schedule + `roles` list, `schedule.json`, HA-synced), `autoEvent.js` (`startAutoEvent`/`stopAutoEvent`). Events snapshot `roles`; `eventStore.eventRoles()` falls back to the 5 built-ins for older events. |
-| [src/utils/dataDir.js](src/utils/dataDir.js) | Per-user data dir: `%LOCALAPPDATA%\BDO Raid Helper` (packaged), `./.data` (dev), `BDO_DATA_DIR` override. ALL mutable files go here. |
+| [src/utils/dataDir.js](src/utils/dataDir.js) | Per-user data dir: `%LOCALAPPDATA%\BDO Balenciaga` (packaged; a pre-rename `BDO Raid Helper` dir is moved on first run), `./.data` (dev), `BDO_DATA_DIR` override. ALL mutable files go here. |
 | [src/utils/baseDir.js](src/utils/baseDir.js) | exe dir (packaged) / cwd (dev). Only for reading `.env`, legacy files. Never write here. |
 | [build.js](build.js) | Bakes env vars into binary, runs pkg, patches PE Console→GUI. Retries on Defender lock. |
 
@@ -26,7 +26,7 @@ compiled at runtime by Windows PowerShell 5.1 `Add-Type` — no extra framework.
 npm start              # dev: .env from cwd, data in ./.data, window + tray
 npm test               # node:test; Windows-only tests compile TrayApp.cs via real PS 5.1
 npm run start:lite     # same, lite edition
-npm run build          # dist/bdo-raid-helper.exe + bdo-raid-helper-lite.exe (TrayApp.cs + icon.ico are pkg assets)
+npm run build          # dist/bdo-balenciaga.exe + bdo-balenciaga-lite.exe (TrayApp.cs + icon.ico are pkg assets)
 node src/commands/deploy.js   # re-register slash commands
 ```
 
@@ -49,11 +49,11 @@ Run the app in a scratch cwd (no `.env`) to test the UI without touching the rea
 - `TrayApp.cs` is C# 5 (no `$""`, `?.`, `=>` members, `out var`) and ASCII-only (test-enforced).
 - PS UI log: `<data>\logs\bdo-tray.log` via `FileStream` + `FileShare.ReadWrite`. **Never `File.AppendAllText`** (conflicts with Node's open `WriteStream`).
 - Windows shutdown: hidden `TrayForm` (kept from the old tray) overrides `WndProc` for `WM_ENDSESSION`, calls `ShutdownBlockReasonCreate`, sends `endSession`, waits ≤ 8 s for Node to exit.
-- Single instance: per-user named pipe `\\.\pipe\bdo-raid-helper-<hash>`; second launch sends `show` and exits (`--minimized` launches just exit).
+- Single instance: per-user named pipe `\\.\pipe\bdo-balenciaga-<hash>`; second launch sends `show` and exits (`--minimized` launches just exit).
 
 ## Auto-start
 
-- Startup-folder `.lnk` (`%APPDATA%\...\Startup\BDO Raid Helper.lnk`) with `--minimized`. HKCU Run key was unreliable on the user's box; legacy Run value is deleted on every update.
+- Startup-folder `.lnk` (`%APPDATA%\...\Startup\BDO Balenciaga.lnk`) with `--minimized`. HKCU Run key was unreliable on the user's box; legacy Run value and pre-rename `BDO Raid Helper.lnk` are deleted on every update.
 - Mirrors the hosting choice: ON creates it, OFF deletes it, startup reconciles. Skipped in dev unless `BDO_DEV_AUTOSTART=1`.
 
 ## Known gotchas (these will bite you again)

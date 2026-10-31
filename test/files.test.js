@@ -71,6 +71,16 @@ test('environment precedence: env > baked > .env > legacy config.json', () => {
 
 test('data dir: override, packaged and dev locations', () => {
   assert.equal(resolveDataDir({ BDO_DATA_DIR: 'C:\\x' }, true), path.resolve('C:\\x'));
-  assert.equal(resolveDataDir({ LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, true), path.join('C:\\Users\\u\\AppData\\Local', 'BDO Raid Helper'));
+  assert.equal(resolveDataDir({ LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, true), path.join('C:\\Users\\u\\AppData\\Local', 'BDO Balenciaga'));
   assert.ok(resolveDataDir({}, false).endsWith('.data'));
+});
+
+test('data dir: pre-rename "BDO Raid Helper" folder is moved to the new name', () => {
+  const local = tmp();
+  fs.mkdirSync(path.join(local, 'BDO Raid Helper'));
+  fs.writeFileSync(path.join(local, 'BDO Raid Helper', 'settings.json'), '{}');
+  const dir = resolveDataDir({ LOCALAPPDATA: local }, true);
+  assert.equal(dir, path.join(local, 'BDO Balenciaga'));
+  assert.ok(fs.existsSync(path.join(dir, 'settings.json')));
+  assert.ok(!fs.existsSync(path.join(local, 'BDO Raid Helper')));
 });

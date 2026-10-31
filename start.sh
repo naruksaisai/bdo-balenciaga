@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Starting BDO Raid Helper..."
+echo "Starting BDO Balenciaga..."
 
 if [ ! -f ".env" ]; then
   echo "ERROR: .env file not found."

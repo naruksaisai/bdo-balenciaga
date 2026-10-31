@@ -1,5 +1,5 @@
 {
-  "name": "bdo-raid-helper",
+  "name": "bdo-balenciaga",
   "version": "1.0.0",
   "description": "Discord bot for Black Desert Online raid/event signups",
   "main": "src/main.js",

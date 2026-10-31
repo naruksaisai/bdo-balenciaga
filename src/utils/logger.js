@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 
-const LOG_FILE_NAME = 'bdo-raid-helper.log';
+const LOG_FILE_NAME = 'bdo-balenciaga.log';
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
 // Shape of a Discord bot token: base64 user id . timestamp . HMAC.

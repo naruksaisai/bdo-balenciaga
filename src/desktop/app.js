@@ -84,7 +84,7 @@ function startDesktop({ hosting, store, startMinimized, logPath, trayLogPath, re
     if (crashes.length >= MAX_UI_CRASHES) {
       console.error(`[UI] UI failed ${crashes.length} times in 10 min (last exit code ${code}); shutting down.`);
       requestExit('ui-failed', 1,
-        'The BDO Raid Helper window could not be kept running, so the app has stopped hosting and closed.');
+        'The BDO Balenciaga window could not be kept running, so the app has stopped hosting and closed.');
       return;
     }
     console.warn(`[UI] UI exited unexpectedly (code ${code}); restarting.`);

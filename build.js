@@ -61,8 +61,8 @@ const target = `node18-${platform}-${arch}`;
 //   full — the admin app with the automatic event settings
 //   lite — hosting and active nodes only, for the other hosts
 const EDITIONS = [
-  { name: 'full', exeName: 'bdo-raid-helper.exe', extra: {} },
-  { name: 'lite', exeName: 'bdo-raid-helper-lite.exe', extra: { BDO_EDITION: 'lite' } },
+  { name: 'full', exeName: 'bdo-balenciaga.exe', extra: {} },
+  { name: 'lite', exeName: 'bdo-balenciaga-lite.exe', extra: { BDO_EDITION: 'lite' } },
 ];
 
 function sleepOneSecond() {

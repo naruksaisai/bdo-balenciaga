@@ -49,7 +49,7 @@ try {
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Web.Extensions
   Add-Type -IgnoreWarnings -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $src
   Write-TrayLog "UI compiled (PS PID $PID)"
-  $code = [BdoRaidHelper.UiApp]::Run($stdinStream, [Console]::OpenStandardOutput())
+  $code = [BdoBalenciaga.UiApp]::Run($stdinStream, [Console]::OpenStandardOutput())
   Write-TrayLog "UI exited with code $code"
   exit $code
 } catch {
@@ -209,7 +209,7 @@ class UiProcess extends EventEmitter {
 function showFatalMessageBox(text) {
   if (process.platform !== 'win32') return Promise.resolve();
   const q = (s) => s.replace(/'/g, "''");
-  const box = `Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.MessageBox]::Show('${q(redact(text))}', 'BDO Raid Helper', 'OK', 'Error')`;
+  const box = `Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.MessageBox]::Show('${q(redact(text))}', 'BDO Balenciaga', 'OK', 'Error')`;
   const launcher = `Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile','-Sta','-EncodedCommand','${encodeCommand(box)}'`;
   return new Promise((resolve) => {
     try {

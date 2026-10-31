@@ -12,15 +12,16 @@ const { execFileSync } = require('child_process');
 
 const LEGACY_REG_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const LEGACY_REG_NAME = 'BDORaidHelper';
+const LEGACY_LNK_NAME = 'BDO Raid Helper.lnk'; // before the rename to BDO Balenciaga
 const AUTOSTART_ARGS = '--minimized';
 
 const isPackaged = () => typeof process.pkg !== 'undefined';
 
-function startupLnkPath() {
+function startupLnkPath(name = 'BDO Balenciaga.lnk') {
   return path.join(
     process.env.APPDATA || '',
     'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup',
-    'BDO Raid Helper.lnk'
+    name
   );
 }
 
@@ -67,6 +68,14 @@ function removeLegacyRunKey() {
   } catch { /* not present — fine */ }
 }
 
+// The pre-rename shortcut points at the old exe; drop it so it can't double-launch.
+function removeLegacyShortcut() {
+  try {
+    fs.unlinkSync(startupLnkPath(LEGACY_LNK_NAME));
+    console.log('[AutoStart] Removed pre-rename startup shortcut.');
+  } catch { /* not present — fine */ }
+}
+
 // Returns { ok:true } or { ok:false, error }. Hosting ON ⇒ enabled.
 function setAutoStart(enabled) {
   if (process.platform !== 'win32') return { ok: true };
@@ -76,6 +85,7 @@ function setAutoStart(enabled) {
     console.log(`[AutoStart] Skipped in dev mode (would set ${enabled ? 'ON' : 'OFF'}).`);
     return { ok: true, skipped: true };
   }
+  removeLegacyShortcut();
   const lnk = startupLnkPath();
   try {
     if (!enabled) {
@@ -90,7 +100,7 @@ function setAutoStart(enabled) {
       `$s.Arguments = '${AUTOSTART_ARGS}';` +
       `$s.WorkingDirectory = '${psQ(path.dirname(exe))}';` +
       `$s.IconLocation = '${psQ(exe)},0';` +
-      `$s.Description = 'BDO Raid Helper Discord bot';` +
+      `$s.Description = 'BDO Balenciaga Discord bot';` +
       `$s.Save()`
     );
     console.log('[AutoStart] Startup shortcut created.');

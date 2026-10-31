@@ -29,7 +29,7 @@ const BASE_DIR = require('./utils/baseDir');
 // the bot token redacted). Dev runs keep console output too.
 const LOG_FILE = logger.installFileLogging(LOG_DIR, { mirrorToConsole: !isPackaged });
 // Separate log for the PowerShell UI host, written with FileShare.ReadWrite so it
-// never conflicts with Node's WriteStream on bdo-raid-helper.log.
+// never conflicts with Node's WriteStream on bdo-balenciaga.log.
 const TRAY_LOG_FILE = path.join(LOG_DIR, 'bdo-tray.log');
 
 // readline SIGINT bridge — only useful when a real console is attached (dev mode).
@@ -69,7 +69,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (err) => {
   console.error('[Node] Uncaught exception:', err);
   shutdown('uncaughtException', 1,
-    `BDO Raid Helper hit an unexpected error and stopped hosting on this PC.\n\n${err && err.message}`);
+    `BDO Balenciaga hit an unexpected error and stopped hosting on this PC.\n\n${err && err.message}`);
 });
 process.on('unhandledRejection', (err) => {
   console.error('[Node] Unhandled rejection:', err);
@@ -138,5 +138,5 @@ async function main() {
 
 main().catch((err) => {
   console.error('Fatal error during startup:', err);
-  shutdown('startup-failure', 1, `BDO Raid Helper could not start: ${err.message}`);
+  shutdown('startup-failure', 1, `BDO Balenciaga could not start: ${err.message}`);
 });

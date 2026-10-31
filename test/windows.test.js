@@ -39,11 +39,11 @@ $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Web.Extensions
 $src = [System.IO.File]::ReadAllText($env:BDO_UI_SRC)
 Add-Type -IgnoreWarnings -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -TypeDefinition $src
-[Console]::Out.Write('OK:' + ('BdoRaidHelper.UiApp' -as [Type]).FullName)`;
+[Console]::Out.Write('OK:' + ('BdoBalenciaga.UiApp' -as [Type]).FullName)`;
   const out = execFileSync('powershell.exe', ['-NoProfile', '-EncodedCommand', encodeCommand(ps)], {
     env: { ...process.env, BDO_UI_SRC: UI_SOURCE_FILE }, encoding: 'utf8', windowsHide: true,
   });
-  assert.equal(out.trim(), 'OK:BdoRaidHelper.UiApp');
+  assert.equal(out.trim(), 'OK:BdoBalenciaga.UiApp');
 });
 
 test('bootstrap delivers source over stdin and the bridge round-trips JSON', { skip: !win, timeout: 120000 }, async () => {
@@ -51,7 +51,7 @@ test('bootstrap delivers source over stdin and the bridge round-trips JSON', { s
   // bootstrap framing and the UTF-8 stream setup without opening a window.
   const echo = `
 using System; using System.IO; using System.Text;
-namespace BdoRaidHelper { public static class UiApp {
+namespace BdoBalenciaga { public static class UiApp {
   public static int Run(Stream input, Stream output) {
     var r = new StreamReader(input, new UTF8Encoding(false));
     var w = new StreamWriter(output, new UTF8Encoding(false)); w.AutoFlush = true;

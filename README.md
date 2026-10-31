@@ -1,4 +1,4 @@
-# BDO Raid Helper
+# BDO Balenciaga
 
 A Discord bot for Black Desert Online raid signups, packaged as a Windows desktop
 app. Several guild members can run it at once: one PC is the **leader** (it runs
@@ -6,13 +6,13 @@ the bot), the others are **standbys** that take over if the leader goes offline.
 
 ## Using the app
 
-Open `bdo-raid-helper.exe`. A window opens and an icon appears in the system tray.
+Open `bdo-balenciaga.exe`. A window opens and an icon appears in the system tray.
 
 There are two versions, built together:
 
-- **`bdo-raid-helper.exe` (full)**: everything below, including the
+- **`bdo-balenciaga.exe` (full)**: everything below, including the
   **Automatic event** settings. For whoever runs the raid schedule.
-- **`bdo-raid-helper-lite.exe` (lite)**: only **Hosting** and **Active nodes**.
+- **`bdo-balenciaga-lite.exe` (lite)**: only **Hosting** and **Active nodes**.
   Give this one to the other hosts. It hosts and takes over as leader exactly
   like the full version, but it can't change the event settings.
 
@@ -73,14 +73,14 @@ starting a second copy.
 ### Where data is stored
 
 Settings, the per-day schedule, the state cache and the logs are stored per user
-in `%LOCALAPPDATA%\BDO Raid Helper\`. The exe can live in a protected folder such
+in `%LOCALAPPDATA%\BDO Balenciaga\`. The exe can live in a protected folder such
 as Program Files and still runs without administrator rights.
 
 The first time the app runs, it **copies** `schedule.json` and `state.json` from
 the exe's folder into this location if they exist there (the originals are left
 untouched). Editable values from an old `config.json` are adopted too.
 
-Logs are `logs\bdo-raid-helper.log` (the app) and `logs\bdo-tray.log` (the window
+Logs are `logs\bdo-balenciaga.log` (the app) and `logs\bdo-tray.log` (the window
 host). The bot token is redacted from all logs and error messages.
 
 ## Building
@@ -90,8 +90,8 @@ host). The bot token is redacted from all logs and error messages.
    `COORDINATION_CHANNEL_ID`. The other values are defaults that users can
    change in the app.
 2. `npm install`
-3. `npm run build`. This produces `dist/bdo-raid-helper.exe` (full) and
-   `dist/bdo-raid-helper-lite.exe` (lite), with the UI and the icon packaged
+3. `npm run build`. This produces `dist/bdo-balenciaga.exe` (full) and
+   `dist/bdo-balenciaga-lite.exe` (lite), with the UI and the icon packaged
    inside. In dev, `npm start` runs the full version and `npm run start:lite`
    runs the lite one.
 4. `node src/commands/deploy.js` registers the slash commands (needed once per
