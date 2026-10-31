@@ -12,7 +12,7 @@ module.exports = async (reaction, user) => {
   const event = getEvent(reaction.message.id);
   if (!event) return;
 
-  const pool = getPoolFromEmoji(reaction.emoji, event.emojis);
+  const pool = getPoolFromEmoji(reaction.emoji, event);
   if (!pool) return;
 
   const member = await reaction.message.guild.members.fetch(user.id);

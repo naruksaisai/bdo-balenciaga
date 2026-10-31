@@ -1,54 +1,53 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const config = require('../config');
-const { createEvent } = require('../state/eventStore');
+const scheduleConfig = require('../scheduler/scheduleConfig');
+const { blankEvent, createEvent } = require('../state/eventStore');
 const { buildEventEmbed } = require('../logic/messageBuilder');
 
-const DEFAULT_LIMITS = { mainball: 20, 'def-team': 10, commander: 2, shai: 3, flex: 5 };
+// Slash options are fixed at deploy time, so only the built-in roles get one.
+// They apply only while that role still exists; every other role uses its max.
+const MAX_OPTIONS = [
+  { option: 'mainball_max',  key: 'mainball',  label: 'Mainball' },
+  { option: 'def_team_max',  key: 'def-team',  label: 'Def Team' },
+  { option: 'commander_max', key: 'commander', label: 'Commander' },
+  { option: 'shai_max',      key: 'shai',      label: 'Shai' },
+  { option: 'flex_max',      key: 'flex',      label: 'Flex' },
+];
+
+const data = new SlashCommandBuilder()
+  .setName('create-event')
+  .setDescription('Create a BDO raid/node war signup event')
+  // Server admins can override this per-role via Server Settings → Integrations.
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageEvents)
+  .addStringOption(o => o.setName('title').setDescription('Event title').setRequired(true))
+  .addStringOption(o => o.setName('description').setDescription('Event description'));
+for (const m of MAX_OPTIONS) {
+  data.addIntegerOption(o => o.setName(m.option).setDescription(`Max ${m.label} (default: the role's max in the app)`).setMinValue(1));
+}
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('create-event')
-    .setDescription('Create a BDO raid/node war signup event')
-    // Server admins can override this per-role via Server Settings → Integrations.
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageEvents)
-    .addStringOption(o => o.setName('title').setDescription('Event title').setRequired(true))
-    .addStringOption(o => o.setName('description').setDescription('Event description'))
-    .addIntegerOption(o => o.setName('mainball_max').setDescription(`Max Mainball (default ${DEFAULT_LIMITS.mainball})`).setMinValue(1))
-    .addIntegerOption(o => o.setName('def_team_max').setDescription(`Max Def Team (default ${DEFAULT_LIMITS['def-team']})`).setMinValue(1))
-    .addIntegerOption(o => o.setName('commander_max').setDescription(`Max Commander (default ${DEFAULT_LIMITS.commander})`).setMinValue(1))
-    .addIntegerOption(o => o.setName('shai_max').setDescription(`Max Shai (default ${DEFAULT_LIMITS.shai})`).setMinValue(1))
-    .addIntegerOption(o => o.setName('flex_max').setDescription(`Max Flex (default ${DEFAULT_LIMITS.flex})`).setMinValue(1)),
+  data,
 
   async execute(interaction) {
     const title = interaction.options.getString('title');
     const description = interaction.options.getString('description') || '';
-    const poolLimits = {
-      mainball: interaction.options.getInteger('mainball_max') ?? DEFAULT_LIMITS.mainball,
-      'def-team': interaction.options.getInteger('def_team_max') ?? DEFAULT_LIMITS['def-team'],
-      commander: interaction.options.getInteger('commander_max') ?? DEFAULT_LIMITS.commander,
-      shai: interaction.options.getInteger('shai_max') ?? DEFAULT_LIMITS.shai,
-      flex: interaction.options.getInteger('flex_max') ?? DEFAULT_LIMITS.flex,
-    };
+    const roles = scheduleConfig.getRoles();
+    const poolLimits = {};
+    for (const r of roles) poolLimits[r.key] = r.max;
+    for (const m of MAX_OPTIONS) {
+      const v = interaction.options.getInteger(m.option);
+      if (v !== null && m.key in poolLimits) poolLimits[m.key] = v;
+    }
 
     await interaction.deferReply();
 
-    const tempEvent = {
-      title, description, poolLimits,
-      pools: { mainball: [], 'def-team': [], commander: [], shai: [], flex: [], donkey: [] },
-      participants: {},
-    };
+    const fields = { title, description, roles, poolLimits, donkeyEmoji: config.donkeyEmoji };
+    const message = await interaction.editReply({ embeds: [buildEventEmbed(blankEvent(fields))] });
 
-    const emojis = config.emojis;
-    tempEvent.emojis = emojis;
-    const embed = buildEventEmbed(tempEvent);
-    const message = await interaction.editReply({ embeds: [embed] });
+    createEvent(message.id, interaction.channelId, interaction.guildId, fields);
 
-    createEvent(message.id, interaction.channelId, interaction.guildId, {
-      title, description, poolLimits, emojis,
-    });
-
-    for (const pool of ['mainball', 'def-team', 'commander', 'shai', 'flex']) {
-      await message.react(emojis[pool]);
+    for (const role of roles) {
+      await message.react(role.emoji);
     }
   },
 };

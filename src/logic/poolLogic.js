@@ -1,4 +1,6 @@
 function assignUser(event, userId, username, selectedPool) {
+  if (!event.pools[selectedPool] || selectedPool === 'donkey') return;
+
   // If already in event, remove first (handles switching pools)
   if (event.participants[userId]) {
     _removeFromPools(event, userId);

@@ -6,6 +6,11 @@ const { useTempDataDir } = require('./helpers');
 useTempDataDir();
 const { Hosting } = require('../src/hosting');
 
+// Hosting's console.log output (e.g. "✅ … online") goes to the test child's
+// stdout, which `node --test` also parses; on Node 24 that intermittently
+// fails with "Unable to deserialize cloned data". Nothing here asserts on it.
+console.log = () => {};
+
 class FakeCoordinator extends EventEmitter {
   constructor(role) {
     super();

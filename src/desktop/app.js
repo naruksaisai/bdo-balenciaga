@@ -7,6 +7,7 @@ const autostart = require('./autostart');
 const { connectionStatus } = require('../settings/environment');
 const { checkCustomEmojis } = require('../settings/emojiCheck');
 const { applySettingsChange } = require('../settings/effects');
+const { edition } = require('../edition');
 
 const MAX_UI_CRASHES = 3;
 const CRASH_WINDOW_MS = 10 * 60 * 1000;
@@ -35,11 +36,14 @@ function startDesktop({ hosting, store, startMinimized, logPath, trayLogPath, re
     ui,
     hosting,
     store,
+    schedule: require('../scheduler/scheduleConfig'),
     monitor,
     autostart,
     connection: connectionStatus(),
-    checkEmojis: (values) => checkCustomEmojis(values, { rest, eventChannelId: config.autoEvent.channelId }),
-    applyChange: (prev, next) => applySettingsChange({ prev, next }, {
+    autoEvent: require('../scheduler/autoEvent'),
+    edition: edition(),
+    checkEmojis: (entries) => checkCustomEmojis(entries, { rest, eventChannelId: config.autoEvent.channelId }),
+    applyChange: (change) => applySettingsChange(change, {
       scheduleConfig: require('../scheduler/scheduleConfig'),
       eventStore: require('../state/eventStore'),
       coordinator: require('../ha/coordinator'),

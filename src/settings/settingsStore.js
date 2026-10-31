@@ -15,6 +15,8 @@ class SettingsStore {
     this._doc = null;
     this.loadWarnings = [];
     this.firstLaunch = false;
+    // Per-role values saved by older versions; only seed schedule.json's roles.
+    this._legacyRoles = {};
   }
 
   // legacySettings: editable keys recovered from a legacy config.json; adopted
@@ -24,6 +26,7 @@ class SettingsStore {
     const r = readJsonFile(this.file);
     if (r.exists && r.value && typeof r.value === 'object') {
       const saved = r.value.settings && typeof r.value.settings === 'object' ? r.value.settings : {};
+      this._legacyRoles = this._keepValid(saved, 'Saved', schema.LEGACY_ROLE_KEYS);
       this._doc = {
         version: SETTINGS_VERSION,
         hostingEnabled: r.value.hostingEnabled === true,
@@ -39,6 +42,7 @@ class SettingsStore {
       );
     }
     this.firstLaunch = !r.exists;
+    if (this.firstLaunch) this._legacyRoles = this._keepValid(legacySettings, 'Legacy config.json', schema.LEGACY_ROLE_KEYS);
     this._doc = {
       version: SETTINGS_VERSION,
       hostingEnabled: false, // hosting defaults to OFF on first launch
@@ -52,10 +56,10 @@ class SettingsStore {
     return this;
   }
 
-  _keepValid(obj, label) {
+  _keepValid(obj, label, keys = schema.KEYS) {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (!schema.KEYS.includes(k)) continue;
+      if (!keys.includes(k)) continue;
       const r = schema.validateField(k, v);
       if (r.error) this.loadWarnings.push(`${label} ${k} is invalid and was ignored: ${r.error}`);
       else out[k] = r.value;
@@ -79,6 +83,12 @@ class SettingsStore {
 
   getEffective() {
     return this.getView().values;
+  }
+
+  // The built-in roles as configured before roles moved to schedule.json.
+  getLegacyRoles() {
+    this._ensureLoaded();
+    return schema.resolveLegacyRoles({ saved: this._legacyRoles, env: process.env });
   }
 
   // Validates, persists, then commits in memory — a failed write leaves the

@@ -8,6 +8,14 @@ the bot), the others are **standbys** that take over if the leader goes offline.
 
 Open `bdo-raid-helper.exe`. A window opens and an icon appears in the system tray.
 
+There are two versions, built together:
+
+- **`bdo-raid-helper.exe` (full)**: everything below, including the
+  **Automatic event** settings. For whoever runs the raid schedule.
+- **`bdo-raid-helper-lite.exe` (lite)**: only **Hosting** and **Active nodes**.
+  Give this one to the other hosts. It hosts and takes over as leader exactly
+  like the full version, but it can't change the event settings.
+
 - **Hosting ON/OFF.** Turns this PC's part in the cluster on or off. Hosting is
   **OFF on first launch**. The choice is remembered.
   - **ON** starts hosting now and adds the app to Windows sign-in startup. After
@@ -21,21 +29,43 @@ Open `bdo-raid-helper.exe`. A window opens and an icon appears in the system tra
   - **Stale** means a node hasn't sent a heartbeat for 20+ minutes.
   - **Unavailable** explains why the count couldn't be read and shows the last
     known count.
-- **Automatic event.** Title, description, default time, the max players for each
-  pool, and the reaction emoji for each pool. **Save** applies the changes;
-  **Cancel** discards them. Invalid fields are flagged next to the field.
+- **Automatic event** (full version only). Title, description, default time,
+  event days and roles. **Save** applies the changes; **Cancel** discards them.
+  Invalid fields are flagged next to the field.
+  - **Event days**: `Su Mo Tu We Th Fr Sa`. An event is posted on every checked
+    day; uncheck a day to skip it every week.
+  - **Create event now**: posts an event card right away, for when the automatic
+    one didn't appear. It uses the **saved** settings and today's role limits,
+    and replaces the card currently in the channel, the same way an automatic
+    event does. Today's automatic event still runs at its time. Only the
+    **leader** PC can do this, because it runs the bot that tracks the reactions.
+  - **Roles**: the pools people react to join. Each has a name, max players and
+    a reaction emoji. **Add role** adds one (up to 20, Discord's reaction limit);
+    **Remove** deletes one (at least one must stay). **Donkey (overflow)** is
+    always there and has no limit.
   - Emoji can be picked from the list, typed, or pasted. Discord custom emojis
     (`<:name:id>` or `<a:name:id>`) work if the bot is in that emoji's server. The
     app checks this with Discord on save.
   - Changes apply to **future** events. Events already posted keep their
-    original emojis, so reactions on them keep working.
-  - Changing the default time or a pool limit also updates days in the per-day
-    schedule that still use the old default. Days customized with
+    original roles and emojis, so reactions on them keep working.
+  - Changing the default time or a role's max also updates days in the per-day
+    schedule that still use the old value. Days customized with
     `/raid-schedule` keep their values.
+  - Roles and event days are shared with every host through the coordination
+    channel. Make changes on the **leader** PC: a standby's changes are replaced
+    by the leader's schedule at its next sync, and the app warns you about this.
 
-**Closing the window** hides it to the tray without changing hosting. The tray
-menu has **Open**, **Hosting ON/OFF**, and **Exit**. **Exit** stops hosting
-cleanly and quits, but your ON/OFF choice is kept for next time.
+**Closing and quitting** depend on Hosting:
+
+- **Hosting OFF**: there is no tray icon. Closing the window quits the app, and it
+  does not start with Windows.
+- **Hosting ON**: the app has a tray icon and starts with Windows. Closing the
+  window hides it to the tray and hosting keeps running. The tray menu has
+  **Open**, **Hosting ON/OFF**, and **Exit**. Turning hosting OFF from the tray
+  brings the window back, since the tray icon goes away.
+- **Exit** (in the window or the tray menu) quits at any time. With hosting ON it
+  asks first, then stops hosting cleanly. Your ON/OFF choice is kept, so a
+  hosting PC starts again at the next Windows sign-in.
 
 **Opening the exe again** brings the running window to the front instead of
 starting a second copy.
@@ -60,10 +90,13 @@ host). The bot token is redacted from all logs and error messages.
    `COORDINATION_CHANNEL_ID`. The other values are defaults that users can
    change in the app.
 2. `npm install`
-3. `npm run build`. This produces `dist/bdo-raid-helper.exe`, with the UI and the
-   icon packaged inside.
+3. `npm run build`. This produces `dist/bdo-raid-helper.exe` (full) and
+   `dist/bdo-raid-helper-lite.exe` (lite), with the UI and the icon packaged
+   inside. In dev, `npm start` runs the full version and `npm run start:lite`
+   runs the lite one.
 4. `node src/commands/deploy.js` registers the slash commands (needed once per
-   bot application).
+   bot application, and again after updating to a version that changes them).
+   `/raid-schedule set-pools` takes `role` + `max` to set any role by name.
 
 Connection values are fixed per build and cannot be edited in the app.
 
@@ -88,10 +121,16 @@ An invalid value at any level falls through to the next one, and the app shows a
 warning when that happens. Connection values follow the same order, except
 level 1 doesn't apply to them.
 
+Roles are kept in the per-day schedule (`schedule.json`), not in the settings.
+The first time a version with editable roles runs, it creates the five built-in
+roles from the old `AUTO_EVENT_*_MAX` and `*_EMOJI` values, using the same order.
+After that, those values are ignored.
+
 ## Development
 
 ```bash
 npm start        # runs from source with .env; data goes to ./.data
+npm run start:lite  # same, as the lite version
 npm test         # unit + Windows integration tests (node:test)
 ```
 

@@ -6,6 +6,7 @@ if (process.argv.includes('--self-test')) {
   try {
     const schema = require('./settings/schema');
     if (!schema.validateSettings(schema.resolveSettings({}).values).ok) throw new Error('defaults invalid');
+    if (!require('./settings/roles').validateRoles(schema.resolveLegacyRoles({})).ok) throw new Error('default roles invalid');
     require('./desktop/uiProcess').loadUiSource();
     require('./hosting');
     process.exit(0);
@@ -81,6 +82,7 @@ async function main() {
   // 1. Connection + default values: environment → baked → .env → legacy config.json
   const { loadEnvironment, connectionStatus } = require('./settings/environment');
   const { legacySettings } = loadEnvironment({ baseDir: BASE_DIR });
+  console.log(`[Node] Edition: ${require('./edition').edition()}`);
 
   // 2. One running copy per Windows user; a second launch just shows the window.
   if (process.platform === 'win32') {

@@ -5,6 +5,36 @@ const { VISIBLE_INTERVAL_MS } = require('./nodeMonitor');
 
 const STALE_AFTER_MS = 3 * VISIBLE_INTERVAL_MS;
 const ROLE_LABELS = { leader: 'Leader', standby: 'Standby', off: 'Off' };
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Built by hand (not Intl) — pkg's node18 runtime ships reduced ICU data.
+function formatWhen(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${DAY_SHORT[d.getDay()]} ${d.getDate()} ${MONTH_SHORT[d.getMonth()]}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatIn(ms) {
+  if (ms < 60 * 1000) return 'in less than a minute';
+  const min = Math.floor(ms / 60000);
+  const h = Math.floor(min / 60);
+  return h ? `in ${h} h ${min % 60} min` : `in ${min} min`;
+}
+
+function roleExplanation(role, state, enabled) {
+  if (role === 'leader') return 'This PC is the leader: it runs the bot and posts the events.';
+  if (role === 'standby') return 'Another PC is the leader. This PC takes over if the leader goes offline.';
+  if (enabled && state === 'starting') return 'Joining the cluster…';
+  return 'This PC is not hosting.';
+}
+
+function nextEventText(role, autoEvent, now) {
+  if (role === 'standby') return 'Posted by the leader PC, not this one.';
+  if (role !== 'leader') return 'Not posted by this PC while hosting is off.';
+  if (!autoEvent || autoEvent.state !== 'scheduled') return (autoEvent && autoEvent.reason) || 'Not scheduled.';
+  return `${formatWhen(autoEvent.at)} (${formatIn(autoEvent.at - now)})`;
+}
 
 function formatAge(ms) {
   if (!Number.isFinite(ms) || ms < 60 * 1000) return 'just now';
@@ -18,7 +48,7 @@ function formatClock(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function hostingView(hosting, enabled, connection) {
+function hostingView(hosting, enabled, connection, autoEvent, now) {
   const { state, role, detail, error } = hosting;
   const busy = state === 'starting' || state === 'stopping';
   let roleLabel = ROLE_LABELS[role] || 'Off';
@@ -34,6 +64,12 @@ function hostingView(hosting, enabled, connection) {
     enabled,
     label: enabled ? 'ON' : 'OFF',
     roleLabel,
+    roleLevel: role === 'leader' || role === 'standby' ? role : 'off',
+    roleExplain: roleExplanation(role, state, enabled),
+    nextEvent: nextEventText(role, autoEvent, now),
+    // "Create event now" needs this PC's bot (the leader's).
+    canCreateEvent: role === 'leader' && state === 'running',
+    createEventHint: role === 'leader' ? '' : 'Only the leader PC can post events.',
     detail: text || '',
     level: error ? 'error' : busy ? 'busy' : enabled ? 'ok' : 'off',
     // Turning OFF is always allowed; ON needs a working connection.
@@ -86,8 +122,8 @@ function notices(connection) {
   return out;
 }
 
-function buildStatusView({ hosting, hostingEnabled, connection, monitor, now = Date.now() }) {
-  const h = hostingView(hosting, hostingEnabled, connection);
+function buildStatusView({ hosting, hostingEnabled, connection, monitor, autoEvent, now = Date.now() }) {
+  const h = hostingView(hosting, hostingEnabled, connection, autoEvent, now);
   const selfHosting = hosting.state === 'running' && hosting.role !== 'off';
   const n = nodesView(monitor, now, selfHosting);
   const roleSuffix = hosting.role !== 'off' ? ` (${ROLE_LABELS[hosting.role]})` : '';

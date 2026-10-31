@@ -150,14 +150,6 @@ namespace BdoRaidHelper
         }
     }
 
-    internal sealed class PoolInfo
-    {
-        public string Key;
-        public string Label;
-        public string MaxKey;   // empty for the overflow pool
-        public string EmojiKey;
-    }
-
     internal enum Feedback { Info, Success, Warning, Error }
 
     // ------------------------------------------------------- shutdown listener
@@ -216,9 +208,9 @@ namespace BdoRaidHelper
         private ContextMenuStrip _menu;
         private ToolStripMenuItem _statusItem, _openItem, _hostingItem, _exitItem;
         private Icon _icon;
-        private List<PoolInfo> _pools;
+        private bool _lite;
         private List<string> _builtinEmojis;
-        private int _maxLimit;
+        private int _maxLimit, _maxRoles;
         private Dictionary<string, object> _lastStatus, _lastSettings;
 
         private readonly Dictionary<int, Action<Dictionary<string, object>>> _pending =
@@ -269,8 +261,8 @@ namespace BdoRaidHelper
                     case "init": OnInit(m); break;
                     case "status": OnStatus(J.Dict(m, "status")); break;
                     case "settings":
-                        _lastSettings = J.Dict(m, "values");
-                        if (_window != null) _window.ApplySettings(_lastSettings, J.List(m, "warnings"));
+                        _lastSettings = m;
+                        if (_window != null) _window.ApplySettings(m, J.List(m, "warnings"), true);
                         break;
                     case "response": OnResponse(m); break;
                     case "show": ShowWindow(); break;
@@ -342,22 +334,13 @@ namespace BdoRaidHelper
             }
             if (_icon == null) _icon = SystemIcons.Application;
 
-            List<PoolInfo> pools = new List<PoolInfo>();
-            foreach (object o in J.List(m, "pools"))
-            {
-                Dictionary<string, object> d = o as Dictionary<string, object>;
-                if (d == null) continue;
-                PoolInfo p = new PoolInfo();
-                p.Key = J.Str(d, "key"); p.Label = J.Str(d, "label");
-                p.MaxKey = J.Str(d, "maxKey"); p.EmojiKey = J.Str(d, "emojiKey");
-                pools.Add(p);
-            }
             List<string> builtin = new List<string>();
             foreach (object o in J.List(m, "builtinEmojis")) builtin.Add(Convert.ToString(o, CultureInfo.InvariantCulture));
 
-            _pools = pools;
+            _lite = J.Str(m, "edition") == "lite";
             _builtinEmojis = builtin;
             _maxLimit = J.Int(m, "maxLimit", 100);
+            _maxRoles = J.Int(m, "maxRoles", 20);
             BuildTray();
             CreateWindow();
 
@@ -370,16 +353,22 @@ namespace BdoRaidHelper
 
         private void CreateWindow()
         {
-            _window = new MainWindow(this, _pools, _builtinEmojis, _maxLimit, _icon);
+            _window = new MainWindow(this, _lite, _builtinEmojis, _maxLimit, _maxRoles, _icon);
             _window.VisibleChanged += delegate { OnWindowVisibility(); };
-            if (_lastSettings != null) _window.ApplySettings(_lastSettings, null);
+            if (_lastSettings != null) _window.ApplySettings(_lastSettings, null, false);
             if (_lastStatus != null) _window.ApplyStatus(_lastStatus);
             UpdateHostingControls();
         }
 
-        public void RememberSettings(Dictionary<string, object> values)
+        // model: { values, roles, days }, the latest the window should show on Cancel.
+        public void RememberSettings(Dictionary<string, object> model)
         {
-            if (values != null) _lastSettings = values;
+            if (model != null) _lastSettings = model;
+        }
+
+        public Dictionary<string, object> LastSettings
+        {
+            get { return _lastSettings; }
         }
 
         private void OnStatus(Dictionary<string, object> st)
@@ -426,13 +415,24 @@ namespace BdoRaidHelper
             _tray.Icon = new Icon(_icon, SystemInformation.SmallIconSize);
             _tray.ContextMenuStrip = _menu;
             _tray.DoubleClick += delegate { ShowWindow(); };
-            _tray.Visible = true;
             UpdateHostingControls();
         }
 
+        public bool HostingEnabled
+        {
+            get { return _hostingEnabled; }
+        }
+
+        // The tray icon exists only while hosting is ON; with hosting OFF the
+        // window is the app, and closing it quits.
         private void UpdateHostingControls()
         {
             bool canClick = _hostingCanToggle && !_hostingPending && !_exitRequested;
+            if (_tray != null) _tray.Visible = _hostingEnabled && !_quitting;
+            // Hosting is OFF (turned off from the tray, or a stale --minimized
+            // launch) and the window is hidden: show it, or the app is invisible.
+            if (_lastStatus != null && !_hostingEnabled && !_exitRequested && !_quitting &&
+                _window != null && !_window.Visible) ShowWindow();
             if (_hostingItem != null)
             {
                 _hostingItem.Text = _hostingEnabled ? "Hosting ON (click to turn OFF)" : "Hosting OFF (click to turn ON)";
@@ -519,7 +519,7 @@ namespace BdoRaidHelper
             Notify("visibility", p);
         }
 
-        private void RequestExit()
+        public void RequestExit()
         {
             if (_exitRequested) return;
             _exitRequested = true;
@@ -583,50 +583,87 @@ namespace BdoRaidHelper
 
     // ------------------------------------------------------------ main window
 
+    // One line of the role table: a role, or the fixed Donkey (overflow) row,
+    // which has no name box, no limit and cannot be removed.
+    internal sealed class RoleRow
+    {
+        public string Key = "";      // empty for a role added in this window
+        public Control NameCell;     // TextBox, or a label for Donkey
+        public Control MaxCell;      // NumericUpDown, or a "no limit" label
+        public TextBox Name;         // null for Donkey
+        public NumericUpDown Max;    // null for Donkey
+        public ComboBox Emoji;
+        public Panel Preview;
+        public Label PreviewText;
+        public PictureBox PreviewImage;
+        public Label Info;
+        public Button Remove;        // null for Donkey
+    }
+
     internal sealed class MainWindow : Form
     {
         private const string KeyTitle = "AUTO_EVENT_TITLE";
         private const string KeyDescription = "AUTO_EVENT_DESCRIPTION";
         private const string KeySchedule = "AUTO_EVENT_SCHEDULE";
+        private const string KeyDonkey = "DONKEY_EMOJI";
+        private const int NewRoleMax = 5;
+
+        // Sunday first, like the user's calendar.
+        private static readonly string[] DayKeys = new string[] { "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday" };
+        private static readonly string[] DayLabels = new string[] { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
 
         private static readonly Regex TimeRe = new Regex("^([01]?[0-9]|2[0-3]):[0-5][0-9]$");
         private static readonly Regex CustomEmojiRe = new Regex("^<(a?):([A-Za-z0-9_]{2,32}):([0-9]{17,20})>$");
+        private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
 
         private readonly TrayApp _app;
-        private readonly List<PoolInfo> _pools;
+        private readonly bool _lite;
+        private readonly List<string> _builtinEmojis;
+        private readonly int _maxLimit, _maxRoles;
         private readonly ErrorProvider _errors = new ErrorProvider();
         private readonly Dictionary<string, Control> _fieldControls = new Dictionary<string, Control>();
-        private readonly Dictionary<string, NumericUpDown> _max = new Dictionary<string, NumericUpDown>();
-        private readonly Dictionary<string, ComboBox> _emoji = new Dictionary<string, ComboBox>();
-        private readonly Dictionary<string, Label> _emojiText = new Dictionary<string, Label>();
-        private readonly Dictionary<string, PictureBox> _emojiImage = new Dictionary<string, PictureBox>();
-        private readonly Dictionary<string, Label> _emojiInfo = new Dictionary<string, Label>();
+        private readonly Dictionary<string, CheckBox> _days = new Dictionary<string, CheckBox>();
+        private readonly List<RoleRow> _roles = new List<RoleRow>();
+        private RoleRow _donkey;
+        private TableLayoutPanel _roleTable;
+        private Label[] _roleHeaders;
+        private Button _addRole;
+        private Button _createNow;
+        private Label _createHint;
+        private bool _canCreateEvent, _posting;
 
-        private Label _hostingValue, _roleValue, _hostingDetail, _notices;
+        private Label _hostingValue, _roleValue, _roleExplain, _nextEvent, _hostingDetail, _notices;
         private Button _hostingButton;
         private Label _nodesCount, _nodesDetail, _nodesUpdated;
         private Button _refreshButton;
         private TextBox _title, _description, _schedule;
         private Label _feedback;
-        private Button _save, _cancel;
+        private Button _save, _cancel, _exit;
 
-        private Dictionary<string, object> _loaded;
+        // Snapshot of the form as last loaded from Node; null until then.
+        private string _loadedSnapshot;
+        // Node sent newer settings while the user had unsaved edits.
+        private bool _stale;
         private bool _applying, _saving;
         public bool AllowClose;
 
-        public MainWindow(TrayApp app, List<PoolInfo> pools, List<string> builtinEmojis, int maxLimit, Icon icon)
+        // lite: hosting and active nodes only, no automatic event settings.
+        public MainWindow(TrayApp app, bool lite, List<string> builtinEmojis, int maxLimit, int maxRoles, Icon icon)
         {
             _app = app;
-            _pools = pools;
+            _lite = lite;
+            _builtinEmojis = builtinEmojis;
+            _maxLimit = maxLimit;
+            _maxRoles = maxRoles;
             _errors.BlinkStyle = ErrorBlinkStyle.NeverBlink;
 
-            Text = "BDO Raid Helper";
+            Text = lite ? "BDO Raid Helper (Lite)" : "BDO Raid Helper";
             Icon = icon;
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Font;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(700, 760);
-            MinimumSize = new Size(600, 560);
+            ClientSize = lite ? new Size(600, 400) : new Size(780, 820);
+            MinimumSize = lite ? new Size(520, 380) : new Size(640, 560);
 
             TableLayoutPanel root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
@@ -640,7 +677,7 @@ namespace BdoRaidHelper
 
             root.Controls.Add(BuildHostingGroup(), 0, 0);
             root.Controls.Add(BuildNodesGroup(), 0, 1);
-            root.Controls.Add(BuildSettingsGroup(builtinEmojis, maxLimit), 0, 2);
+            if (!lite) root.Controls.Add(BuildSettingsGroup(), 0, 2);
             root.Controls.Add(BuildButtonRow(), 0, 3);
 
             FormClosing += OnFormClosing;
@@ -700,8 +737,16 @@ namespace BdoRaidHelper
 
             _hostingValue = MakeLabel("...");
             _hostingValue.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
-            _roleValue = MakeLabel("...");
-            _roleValue.Font = new Font(Font, FontStyle.Bold);
+            // Colored badge so leader / standby is obvious at a glance.
+            _roleValue = MakeLabel("OFF");
+            _roleValue.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
+            _roleValue.ForeColor = Color.White;
+            _roleValue.BackColor = Color.Gray;
+            _roleValue.Padding = new Padding(8, 2, 8, 2);
+            _roleExplain = MakeWrapLabel();
+            _roleExplain.MaximumSize = new Size(470, 0);
+            _nextEvent = MakeLabel("");
+            _nextEvent.Font = new Font(Font, FontStyle.Bold);
             _hostingButton = new Button();
             _hostingButton.Text = "Turn hosting ON";
             _hostingButton.AutoSize = true;
@@ -719,9 +764,14 @@ namespace BdoRaidHelper
             t.SetRowSpan(_hostingButton, 2);
             t.Controls.Add(MakeLabel("This PC's role:"), 0, 1);
             t.Controls.Add(_roleValue, 1, 1);
-            t.Controls.Add(_hostingDetail, 0, 2);
+            t.Controls.Add(_roleExplain, 1, 2);
+            t.SetColumnSpan(_roleExplain, 2);
+            t.Controls.Add(MakeLabel("Next event:"), 0, 3);
+            t.Controls.Add(_nextEvent, 1, 3);
+            t.SetColumnSpan(_nextEvent, 2);
+            t.Controls.Add(_hostingDetail, 0, 4);
             t.SetColumnSpan(_hostingDetail, 3);
-            t.Controls.Add(_notices, 0, 3);
+            t.Controls.Add(_notices, 0, 5);
             t.SetColumnSpan(_notices, 3);
             return MakeGroup("Hosting", t);
         }
@@ -763,7 +813,7 @@ namespace BdoRaidHelper
             return MakeGroup("Active nodes", t);
         }
 
-        private Control BuildSettingsGroup(List<string> builtinEmojis, int maxLimit)
+        private Control BuildSettingsGroup()
         {
             TableLayoutPanel outer = MakeTable(2);
             outer.Dock = DockStyle.Top;
@@ -796,103 +846,86 @@ namespace BdoRaidHelper
             timeHint.ForeColor = SystemColors.GrayText;
             timeRow.Controls.Add(timeHint);
 
+            FlowLayoutPanel dayRow = new FlowLayoutPanel();
+            dayRow.AutoSize = true;
+            dayRow.WrapContents = false;
+            dayRow.Margin = new Padding(0);
+            for (int i = 0; i < DayKeys.Length; i++)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Text = DayLabels[i];
+                cb.AutoSize = true;
+                cb.Margin = new Padding(3, 5, 8, 3);
+                cb.CheckedChanged += delegate { OnFieldChanged(); };
+                _days[DayKeys[i]] = cb;
+                dayRow.Controls.Add(cb);
+            }
+            Label dayHint = MakeLabel("an event is posted on each checked day");
+            dayHint.ForeColor = SystemColors.GrayText;
+            dayRow.Controls.Add(dayHint);
+
             outer.Controls.Add(MakeLabel("Event title"), 0, 0);
             outer.Controls.Add(_title, 1, 0);
             outer.Controls.Add(MakeLabel("Description"), 0, 1);
             outer.Controls.Add(_description, 1, 1);
             outer.Controls.Add(MakeLabel("Default time"), 0, 2);
             outer.Controls.Add(timeRow, 1, 2);
+            outer.Controls.Add(MakeLabel("Event days"), 0, 3);
+            outer.Controls.Add(dayRow, 1, 3);
+
+            // Manual fallback for when the automatic event did not post.
+            FlowLayoutPanel nowRow = new FlowLayoutPanel();
+            nowRow.AutoSize = true;
+            nowRow.WrapContents = false;
+            nowRow.Margin = new Padding(0);
+            _createNow = new Button();
+            _createNow.Text = "Create event now";
+            _createNow.AutoSize = true;
+            _createNow.Enabled = false;
+            _createNow.Click += delegate { CreateEventNow(); };
+            _createHint = MakeLabel("");
+            _createHint.ForeColor = SystemColors.GrayText;
+            nowRow.Controls.Add(_createNow);
+            nowRow.Controls.Add(_createHint);
+            outer.Controls.Add(MakeLabel("Post now"), 0, 4);
+            outer.Controls.Add(nowRow, 1, 4);
 
             Label note = MakeWrapLabel();
             note.ForeColor = SystemColors.GrayText;
-            note.Text = "The default time and pool limits also update any day of the per-day schedule that still uses the previous default. " +
-                        "Days customized with /raid-schedule keep their own values. Events already posted are not changed.";
-            outer.Controls.Add(note, 0, 3);
+            note.Text = "Uncheck a day to skip its event every week. A new default time or role max also updates any day of the " +
+                        "per-day schedule still using the previous value; days customized with /raid-schedule keep their own. " +
+                        "Events already posted are not changed.";
+            outer.Controls.Add(note, 0, 5);
             outer.SetColumnSpan(note, 2);
 
-            TableLayoutPanel pt = MakeTable(5);
-            pt.Margin = new Padding(0, 8, 0, 0);
-            pt.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            pt.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            pt.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            pt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
-            pt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            string[] headers = new string[] { "Pool", "Max players", "Emoji (pick, type or paste)", "Preview", "" };
+            _roleTable = MakeTable(6);
+            _roleTable.Margin = new Padding(0, 8, 0, 0);
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 56));
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _roleTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            string[] headers = new string[] { "Role", "Max players", "Emoji (pick, type or paste)", "Preview", "", "" };
+            _roleHeaders = new Label[headers.Length];
             for (int i = 0; i < headers.Length; i++)
             {
-                Label h = MakeLabel(headers[i]);
-                h.Font = new Font(Font, FontStyle.Bold);
-                pt.Controls.Add(h, i, 0);
+                _roleHeaders[i] = MakeLabel(headers[i]);
+                _roleHeaders[i].Font = new Font(Font, FontStyle.Bold);
             }
+            _donkey = MakeRoleRow(true);
+            _fieldControls[KeyDonkey] = _donkey.Emoji;
+            RebuildRoleTable();
+            outer.Controls.Add(_roleTable, 0, 6);
+            outer.SetColumnSpan(_roleTable, 2);
 
-            int row = 1;
-            foreach (PoolInfo pool in _pools)
-            {
-                PoolInfo p = pool;
-                pt.Controls.Add(MakeLabel(p.Label), 0, row);
-
-                if (p.MaxKey.Length > 0)
-                {
-                    NumericUpDown n = new NumericUpDown();
-                    n.Minimum = 1;
-                    n.Maximum = maxLimit;
-                    n.Width = 70;
-                    n.Anchor = AnchorStyles.Left;
-                    n.Margin = errorRoom;
-                    n.ValueChanged += delegate { OnFieldChanged(); };
-                    n.KeyUp += delegate { OnFieldChanged(); };
-                    _max[p.MaxKey] = n;
-                    _fieldControls[p.MaxKey] = n;
-                    pt.Controls.Add(n, 1, row);
-                }
-                else
-                {
-                    Label overflow = MakeLabel("no limit");
-                    overflow.ForeColor = SystemColors.GrayText;
-                    pt.Controls.Add(overflow, 1, row);
-                }
-
-                ComboBox c = new ComboBox();
-                c.DropDownStyle = ComboBoxStyle.DropDown;
-                c.Width = 200;
-                c.MaxLength = 64;
-                c.Anchor = AnchorStyles.Left;
-                c.Font = new Font("Segoe UI Emoji", 10f);
-                c.Margin = errorRoom;
-                foreach (string e in builtinEmojis) c.Items.Add(e);
-                c.TextChanged += delegate { UpdatePreview(p); OnFieldChanged(); };
-                _emoji[p.EmojiKey] = c;
-                _fieldControls[p.EmojiKey] = c;
-                pt.Controls.Add(c, 2, row);
-
-                Panel preview = new Panel();
-                preview.Size = new Size(46, 34);
-                preview.Margin = new Padding(3, 1, 3, 1);
-                Label pv = new Label();
-                pv.Dock = DockStyle.Fill;
-                pv.TextAlign = ContentAlignment.MiddleCenter;
-                pv.Font = new Font("Segoe UI Emoji", 15f);
-                pv.UseMnemonic = false;
-                PictureBox pb = new PictureBox();
-                pb.Size = new Size(30, 30);
-                pb.Location = new Point(8, 2);
-                pb.SizeMode = PictureBoxSizeMode.Zoom;
-                pb.Visible = false;
-                preview.Controls.Add(pb);
-                preview.Controls.Add(pv);
-                _emojiText[p.EmojiKey] = pv;
-                _emojiImage[p.EmojiKey] = pb;
-                pt.Controls.Add(preview, 3, row);
-
-                Label info = MakeLabel("");
-                info.ForeColor = SystemColors.GrayText;
-                info.UseMnemonic = false;
-                _emojiInfo[p.EmojiKey] = info;
-                pt.Controls.Add(info, 4, row);
-                row++;
-            }
-            outer.Controls.Add(pt, 0, 4);
-            outer.SetColumnSpan(pt, 2);
+            _addRole = new Button();
+            _addRole.Text = "Add role";
+            _addRole.AutoSize = true;
+            _addRole.Margin = new Padding(3, 6, 3, 3);
+            _addRole.Click += delegate { AddRole(); };
+            outer.Controls.Add(_addRole, 0, 7);
+            outer.SetColumnSpan(_addRole, 2);
 
             _fieldControls[KeyTitle] = _title;
             _fieldControls[KeyDescription] = _description;
@@ -917,15 +950,26 @@ namespace BdoRaidHelper
 
         private Control BuildButtonRow()
         {
-            TableLayoutPanel t = MakeTable(3);
+            TableLayoutPanel t = MakeTable(4);
             t.Dock = DockStyle.Fill;
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             _feedback = MakeWrapLabel();
-            _feedback.MaximumSize = new Size(470, 0);
+            _feedback.MaximumSize = new Size(_lite ? 460 : 380, 0);
             _feedback.UseMnemonic = false;
+            t.Controls.Add(_feedback, 0, 0);
+            _exit = new Button();
+            _exit.Text = "Exit";
+            _exit.AutoSize = true;
+            _exit.MinimumSize = new Size(90, 30);
+            _exit.Margin = new Padding(3, 3, _lite ? 3 : 16, 3);
+            _exit.Click += delegate { ExitClicked(); };
+            t.Controls.Add(_exit, 1, 0);
+            if (_lite) return t;
+
             _cancel = new Button();
             _cancel.Text = "Cancel";
             _cancel.AutoSize = true;
@@ -937,10 +981,151 @@ namespace BdoRaidHelper
             _save.MinimumSize = new Size(90, 30);
             _save.Click += delegate { Save(); };
 
-            t.Controls.Add(_feedback, 0, 0);
-            t.Controls.Add(_cancel, 1, 0);
-            t.Controls.Add(_save, 2, 0);
+            t.Controls.Add(_cancel, 2, 0);
+            t.Controls.Add(_save, 3, 0);
             return t;
+        }
+
+        // ---- role table
+
+        private RoleRow MakeRoleRow(bool donkey)
+        {
+            Padding errorRoom = new Padding(3, 3, 24, 3);
+            RoleRow r = new RoleRow();
+            if (donkey)
+            {
+                r.NameCell = MakeLabel("Donkey (overflow)");
+                Label noLimit = MakeLabel("no limit");
+                noLimit.ForeColor = SystemColors.GrayText;
+                r.MaxCell = noLimit;
+            }
+            else
+            {
+                TextBox name = new TextBox();
+                name.Width = 140;
+                name.MaxLength = 32;
+                name.Anchor = AnchorStyles.Left;
+                name.Margin = errorRoom;
+                name.TextChanged += delegate { OnFieldChanged(); };
+                r.Name = name;
+                r.NameCell = name;
+
+                NumericUpDown n = new NumericUpDown();
+                n.Minimum = 1;
+                n.Maximum = _maxLimit;
+                n.Width = 60;
+                n.Anchor = AnchorStyles.Left;
+                n.Margin = errorRoom;
+                n.ValueChanged += delegate { OnFieldChanged(); };
+                n.KeyUp += delegate { OnFieldChanged(); };
+                r.Max = n;
+                r.MaxCell = n;
+
+                Button remove = new Button();
+                remove.Text = "Remove";
+                remove.AutoSize = true;
+                remove.Anchor = AnchorStyles.Left;
+                remove.Click += delegate { RemoveRole(r); };
+                r.Remove = remove;
+            }
+
+            ComboBox c = new ComboBox();
+            c.DropDownStyle = ComboBoxStyle.DropDown;
+            c.Width = 170;
+            c.MaxLength = 64;
+            c.Anchor = AnchorStyles.Left;
+            c.Font = new Font("Segoe UI Emoji", 10f);
+            c.Margin = errorRoom;
+            foreach (string e in _builtinEmojis) c.Items.Add(e);
+            c.TextChanged += delegate { UpdatePreview(r); OnFieldChanged(); };
+            r.Emoji = c;
+
+            Panel preview = new Panel();
+            preview.Size = new Size(46, 34);
+            preview.Margin = new Padding(3, 1, 3, 1);
+            Label pv = new Label();
+            pv.Dock = DockStyle.Fill;
+            pv.TextAlign = ContentAlignment.MiddleCenter;
+            pv.Font = new Font("Segoe UI Emoji", 15f);
+            pv.UseMnemonic = false;
+            PictureBox pb = new PictureBox();
+            pb.Size = new Size(30, 30);
+            pb.Location = new Point(8, 2);
+            pb.SizeMode = PictureBoxSizeMode.Zoom;
+            pb.Visible = false;
+            preview.Controls.Add(pb);
+            preview.Controls.Add(pv);
+            r.Preview = preview;
+            r.PreviewText = pv;
+            r.PreviewImage = pb;
+
+            Label info = MakeLabel("");
+            info.ForeColor = SystemColors.GrayText;
+            info.UseMnemonic = false;
+            r.Info = info;
+            return r;
+        }
+
+        // Re-lays out the header, every role row and the Donkey row.
+        private void RebuildRoleTable()
+        {
+            _roleTable.SuspendLayout();
+            _roleTable.Controls.Clear();
+            for (int i = 0; i < _roleHeaders.Length; i++) _roleTable.Controls.Add(_roleHeaders[i], i, 0);
+            int row = 1;
+            foreach (RoleRow r in _roles) AddRowCells(r, row++);
+            AddRowCells(_donkey, row);
+            _roleTable.RowCount = row + 1;
+            _roleTable.ResumeLayout();
+            UpdateRoleButtons();
+        }
+
+        private void AddRowCells(RoleRow r, int row)
+        {
+            _roleTable.Controls.Add(r.NameCell, 0, row);
+            _roleTable.Controls.Add(r.MaxCell, 1, row);
+            _roleTable.Controls.Add(r.Emoji, 2, row);
+            _roleTable.Controls.Add(r.Preview, 3, row);
+            if (r.Remove != null) _roleTable.Controls.Add(r.Remove, 4, row);
+            _roleTable.Controls.Add(r.Info, 5, row);
+        }
+
+        private void DisposeRow(RoleRow r)
+        {
+            try { r.PreviewImage.CancelAsync(); } catch { }
+            Control[] cells = new Control[] { r.NameCell, r.MaxCell, r.Emoji, r.Preview, r.Remove, r.Info };
+            foreach (Control c in cells)
+            {
+                if (c == null) continue;
+                _errors.SetError(c, "");
+                c.Dispose();
+            }
+        }
+
+        private void UpdateRoleButtons()
+        {
+            if (_addRole != null) _addRole.Enabled = _roles.Count < _maxRoles;
+            foreach (RoleRow r in _roles) r.Remove.Enabled = _roles.Count > 1;
+        }
+
+        private void AddRole()
+        {
+            if (_roles.Count >= _maxRoles) return;
+            RoleRow r = MakeRoleRow(false);
+            r.Max.Value = Math.Min(NewRoleMax, _maxLimit);
+            _roles.Add(r);
+            RebuildRoleTable();
+            UpdatePreview(r);
+            r.Name.Focus();
+            OnFieldChanged();
+        }
+
+        private void RemoveRole(RoleRow r)
+        {
+            if (_roles.Count <= 1 || !_roles.Remove(r)) return;
+            RebuildRoleTable();
+            DisposeRow(r);
+            OnFieldChanged();
         }
 
         // ---- window behavior
@@ -948,11 +1133,44 @@ namespace BdoRaidHelper
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             if (AllowClose || e.CloseReason == CloseReason.WindowsShutDown) return;
-            // Any other close (X button, Alt+F4, WM_CLOSE from outside) hides to
-            // the tray; hosting keeps whatever state it had.
+            // Any other close (X button, Alt+F4, WM_CLOSE from outside): with
+            // hosting OFF there is no tray icon, so it quits (Node exits cleanly
+            // and sends "quit", which closes us with AllowClose). With hosting ON
+            // it hides to the tray and hosting keeps running.
             e.Cancel = true;
+            if (!_app.HostingEnabled)
+            {
+                _app.RequestExit();
+                return;
+            }
             Hide();
             _app.OnWindowHiddenToTray();
+        }
+
+        private void ExitClicked()
+        {
+            if (_app.HostingEnabled && MessageBox.Show(this,
+                    "Exit stops hosting on this PC until you open the app again or sign in to Windows.\r\n\r\nExit now?",
+                    "Exit BDO Raid Helper", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            _app.RequestExit();
+        }
+
+        private void CreateEventNow()
+        {
+            string text = "Post a new event card in the event channel now, using the saved settings?\r\n\r\n" +
+                          "The card currently in the channel is removed. Today's automatic event still runs at its usual time.";
+            if (IsDirty()) text += "\r\n\r\nYou have unsaved changes and they are not used. Save first to include them.";
+            if (MessageBox.Show(this, text, "Create event now", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            _posting = true;
+            _createNow.Enabled = false;
+            SetFeedback("Posting the event...", Feedback.Info);
+            _app.Request("createEventNow", null, delegate(Dictionary<string, object> resp)
+            {
+                _posting = false;
+                _createNow.Enabled = _canCreateEvent;
+                if (J.Bool(resp, "ok")) SetFeedback(J.Str(resp, "message"), Feedback.Success);
+                else SetFeedback(J.Str(resp, "error"), Feedback.Error);
+            });
         }
 
         // ---- status
@@ -970,9 +1188,20 @@ namespace BdoRaidHelper
             string level = J.Str(h, "level");
             _hostingValue.Text = J.Str(h, "label");
             _hostingValue.ForeColor = enabled ? Color.ForestGreen : SystemColors.GrayText;
-            _roleValue.Text = J.Str(h, "roleLabel");
+            string roleLevel = J.Str(h, "roleLevel");
+            _roleValue.Text = J.Str(h, "roleLabel").ToUpperInvariant();
+            _roleValue.BackColor = roleLevel == "leader" ? Color.ForestGreen : roleLevel == "standby" ? Color.SteelBlue : Color.Gray;
+            _roleExplain.Text = J.Str(h, "roleExplain");
+            _nextEvent.Text = J.Str(h, "nextEvent");
+            _nextEvent.ForeColor = roleLevel == "leader" ? SystemColors.ControlText : SystemColors.GrayText;
             _hostingDetail.Text = J.Str(h, "detail");
             _hostingDetail.ForeColor = level == "error" ? Color.Firebrick : SystemColors.ControlText;
+            _canCreateEvent = J.Bool(h, "canCreateEvent");
+            if (_createNow != null)
+            {
+                _createNow.Enabled = _canCreateEvent && !_posting;
+                _createHint.Text = J.Str(h, "createEventHint");
+            }
 
             List<string> notes = new List<string>();
             foreach (object o in J.List(st, "notices")) notes.Add(Convert.ToString(o, CultureInfo.InvariantCulture));
@@ -1000,30 +1229,57 @@ namespace BdoRaidHelper
 
         // ---- settings
 
-        public void ApplySettings(Dictionary<string, object> values, List<object> warnings)
+        // model: { values, roles, days } from Node. fromPush: Node sent it on its
+        // own (another PC or /raid-schedule changed the schedule) - unsaved
+        // edits are kept and the user is told instead.
+        public void ApplySettings(Dictionary<string, object> model, List<object> warnings, bool fromPush)
         {
+            if (_lite || model == null) return;
+            Dictionary<string, object> values = J.Dict(model, "values");
             if (values == null) return;
-            _loaded = values;
+            if (fromPush && _loadedSnapshot != null && (_saving || IsDirty()))
+            {
+                _stale = true;
+                SetFeedback("The schedule was changed elsewhere (another PC or /raid-schedule). Click Cancel to load it, or Save to keep your changes.", Feedback.Warning);
+                UpdateDirty();
+                return;
+            }
+
+            List<RoleRow> old = new List<RoleRow>(_roles);
             _applying = true;
             try
             {
                 _title.Text = J.Str(values, KeyTitle);
                 _description.Text = J.Str(values, KeyDescription).Replace("\r\n", "\n").Replace("\n", "\r\n");
                 _schedule.Text = J.Str(values, KeySchedule);
-                foreach (KeyValuePair<string, NumericUpDown> kv in _max)
+                _donkey.Emoji.Text = J.Str(values, KeyDonkey);
+                _donkey.Emoji.SelectionLength = 0;
+                Dictionary<string, object> days = J.Dict(model, "days");
+                foreach (KeyValuePair<string, CheckBox> kv in _days) kv.Value.Checked = J.Bool(days, kv.Key);
+
+                _roles.Clear();
+                foreach (object o in J.List(model, "roles"))
                 {
-                    int v = J.Int(values, kv.Key, 1);
-                    kv.Value.Value = Math.Max(kv.Value.Minimum, Math.Min(kv.Value.Maximum, v));
+                    Dictionary<string, object> d = o as Dictionary<string, object>;
+                    if (d == null) continue;
+                    RoleRow r = MakeRoleRow(false);
+                    r.Key = J.Str(d, "key");
+                    r.Name.Text = J.Str(d, "label");
+                    int v = J.Int(d, "max", 1);
+                    r.Max.Value = Math.Max(r.Max.Minimum, Math.Min(r.Max.Maximum, v));
+                    r.Emoji.Text = J.Str(d, "emoji");
+                    r.Emoji.SelectionLength = 0;
+                    _roles.Add(r);
                 }
-                foreach (KeyValuePair<string, ComboBox> kv in _emoji)
-                {
-                    kv.Value.Text = J.Str(values, kv.Key);
-                    kv.Value.SelectionLength = 0;
-                }
+                RebuildRoleTable();
             }
             finally { _applying = false; }
-            foreach (PoolInfo p in _pools) UpdatePreview(p);
+            foreach (RoleRow r in old) DisposeRow(r);
+            foreach (RoleRow r in _roles) UpdatePreview(r);
+            UpdatePreview(_donkey);
             _errors.Clear();
+            _stale = false;
+            _loadedSnapshot = Snapshot();
             UpdateDirty();
             if (warnings != null && warnings.Count > 0)
             {
@@ -1033,28 +1289,44 @@ namespace BdoRaidHelper
             }
         }
 
+        // The saveSettings request body: { settings, roles, days }.
         private Dictionary<string, object> Collect()
         {
-            Dictionary<string, object> v = new Dictionary<string, object>();
-            v[KeyTitle] = _title.Text;
-            v[KeyDescription] = _description.Text.Replace("\r\n", "\n");
-            v[KeySchedule] = _schedule.Text.Trim();
-            foreach (KeyValuePair<string, NumericUpDown> kv in _max) v[kv.Key] = (int)kv.Value.Value;
-            foreach (KeyValuePair<string, ComboBox> kv in _emoji) v[kv.Key] = kv.Value.Text.Trim();
-            return v;
+            Dictionary<string, object> s = new Dictionary<string, object>();
+            s[KeyTitle] = _title.Text;
+            s[KeyDescription] = _description.Text.Replace("\r\n", "\n");
+            s[KeySchedule] = _schedule.Text.Trim();
+            s[KeyDonkey] = _donkey.Emoji.Text.Trim();
+
+            List<object> roles = new List<object>();
+            foreach (RoleRow r in _roles)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["key"] = r.Key;
+                d["label"] = r.Name.Text.Trim();
+                d["emoji"] = r.Emoji.Text.Trim();
+                d["max"] = (int)r.Max.Value;
+                roles.Add(d);
+            }
+
+            Dictionary<string, object> days = new Dictionary<string, object>();
+            foreach (string day in DayKeys) days[day] = _days[day].Checked;
+
+            Dictionary<string, object> p = new Dictionary<string, object>();
+            p["settings"] = s;
+            p["roles"] = roles;
+            p["days"] = days;
+            return p;
+        }
+
+        private string Snapshot()
+        {
+            return Json.Serialize(Collect());
         }
 
         private bool IsDirty()
         {
-            if (_loaded == null) return false;
-            Dictionary<string, object> cur = Collect();
-            foreach (KeyValuePair<string, object> kv in cur)
-            {
-                string a = Convert.ToString(kv.Value, CultureInfo.InvariantCulture);
-                string b = J.Str(_loaded, kv.Key);
-                if (a != b) return true;
-            }
-            return false;
+            return _loadedSnapshot != null && Snapshot() != _loadedSnapshot;
         }
 
         private void OnFieldChanged()
@@ -1065,17 +1337,18 @@ namespace BdoRaidHelper
 
         private void UpdateDirty()
         {
+            if (_lite) return;
             bool dirty = IsDirty();
-            _save.Enabled = dirty && !_saving && _loaded != null;
-            _cancel.Enabled = dirty && !_saving;
+            _save.Enabled = dirty && !_saving && _loadedSnapshot != null;
+            _cancel.Enabled = (dirty || _stale) && !_saving;
         }
 
-        private void UpdatePreview(PoolInfo p)
+        private void UpdatePreview(RoleRow r)
         {
-            string text = _emoji[p.EmojiKey].Text.Trim();
-            Label pv = _emojiText[p.EmojiKey];
-            PictureBox pb = _emojiImage[p.EmojiKey];
-            Label info = _emojiInfo[p.EmojiKey];
+            string text = r.Emoji.Text.Trim();
+            Label pv = r.PreviewText;
+            PictureBox pb = r.PreviewImage;
+            Label info = r.Info;
             Match m = CustomEmojiRe.Match(text);
             try { pb.CancelAsync(); } catch { }
 
@@ -1126,30 +1399,48 @@ namespace BdoRaidHelper
             return pictograph;
         }
 
+        // Error keys from Node: setting keys, or roles.<index>.<label|max|emoji>.
+        private Control FieldControl(string key)
+        {
+            Control c;
+            if (_fieldControls.TryGetValue(key, out c)) return c;
+            string[] parts = key.Split('.');
+            int i;
+            if (parts.Length == 3 && parts[0] == "roles" &&
+                int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out i) && i >= 0 && i < _roles.Count)
+            {
+                RoleRow r = _roles[i];
+                if (parts[2] == "label") return r.Name;
+                if (parts[2] == "max") return r.Max;
+                if (parts[2] == "emoji") return r.Emoji;
+            }
+            return null;
+        }
+
         private void Save()
         {
             _errors.Clear();
             bool bad = false;
             if (!TimeRe.IsMatch(_schedule.Text.Trim())) { _errors.SetError(_schedule, "Use 24-hour HH:MM, for example 21:30."); bad = true; }
             if (_title.Text.Trim().Length == 0) { _errors.SetError(_title, "Title is required."); bad = true; }
-            foreach (KeyValuePair<string, ComboBox> kv in _emoji)
+            foreach (RoleRow r in _roles)
             {
-                if (kv.Value.Text.Trim().Length == 0) { _errors.SetError(kv.Value, "Choose an emoji."); bad = true; }
+                if (r.Name.Text.Trim().Length == 0) { _errors.SetError(r.Name, "Enter a name."); bad = true; }
+                if (r.Emoji.Text.Trim().Length == 0) { _errors.SetError(r.Emoji, "Choose an emoji."); bad = true; }
             }
+            if (_donkey.Emoji.Text.Trim().Length == 0) { _errors.SetError(_donkey.Emoji, "Choose an emoji."); bad = true; }
             if (bad) { SetFeedback("Fix the highlighted fields, then save again.", Feedback.Error); return; }
 
             _saving = true;
             UpdateDirty();
             SetFeedback("Saving...", Feedback.Info);
-            Dictionary<string, object> payload = new Dictionary<string, object>();
-            payload["settings"] = Collect();
-            _app.Request("saveSettings", payload, delegate(Dictionary<string, object> resp)
+            _app.Request("saveSettings", Collect(), delegate(Dictionary<string, object> resp)
             {
                 _saving = false;
                 if (J.Bool(resp, "ok"))
                 {
-                    ApplySettings(J.Dict(resp, "values"), null);
-                    _app.RememberSettings(J.Dict(resp, "values"));
+                    ApplySettings(resp, null, false);
+                    _app.RememberSettings(resp);
                     List<object> warnings = J.List(resp, "warnings");
                     string msg = J.Str(resp, "message");
                     if (warnings.Count > 0)
@@ -1168,8 +1459,8 @@ namespace BdoRaidHelper
                     {
                         foreach (KeyValuePair<string, object> kv in fe)
                         {
-                            Control c;
-                            if (_fieldControls.TryGetValue(kv.Key, out c))
+                            Control c = FieldControl(kv.Key);
+                            if (c != null)
                             {
                                 _errors.SetError(c, Convert.ToString(kv.Value, CultureInfo.InvariantCulture));
                                 shown++;
@@ -1185,8 +1476,9 @@ namespace BdoRaidHelper
 
         private void CancelEdits()
         {
-            if (_loaded == null) return;
-            ApplySettings(_loaded, null);
+            Dictionary<string, object> latest = _app.LastSettings;
+            if (latest == null) return;
+            ApplySettings(latest, null, false);
             SetFeedback("Changes discarded.", Feedback.Info);
         }
     }

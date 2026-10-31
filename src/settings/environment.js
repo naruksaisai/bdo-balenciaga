@@ -30,7 +30,7 @@ function loadEnvironment({ baseDir, baked = loadBaked() } = {}) {
         if (CONNECTION_KEYS.includes(k) || k === 'AUTO_EVENT_ENABLED') process.env[k] = String(v);
         // Only keys that were actually in effect (not overridden by env/baked) migrate,
         // so the effective configuration is identical before and after migration.
-        else if (schema.KEYS.includes(k)) legacySettings[k] = v;
+        else if (schema.ALL_KEYS.includes(k)) legacySettings[k] = v;
       }
     } catch (err) {
       console.warn('[Config] Ignoring unreadable legacy config.json:', err.message);

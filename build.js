@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 
 // Load .env so values are available in process.env
@@ -9,7 +10,8 @@ const BAKED = 'src/baked-config.js';
 
 // All env vars the app reads — only bake non-empty values.
 // The four Discord connection values are fixed per build and never editable in
-// the app. The rest are defaults the user can override in the desktop UI.
+// the app. The rest are defaults the user can override in the desktop UI (the
+// per-role *_MAX / *_EMOJI values seed the role list on first run).
 //
 // NOTE: baked values (including DISCORD_BOT_TOKEN) are stored in plain form
 // inside the exe. Anyone with the file can extract them — only share a build
@@ -50,31 +52,48 @@ for (const key of KNOWN_VARS) {
   if (process.env[key]) baked[key] = process.env[key];
 }
 
-// Write temporary baked-config.js — pkg will bundle this into the binary
-fs.writeFileSync(
-  BAKED,
-  `// Auto-generated at build time — do not edit\nmodule.exports = ${JSON.stringify(baked, null, 2)};\n`,
-  'utf8'
-);
-
 const PLATFORM_MAP = { win32: 'win', darwin: 'macos', linux: 'linux' };
 const platform = PLATFORM_MAP[process.platform] ?? process.platform;
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 const target = `node18-${platform}-${arch}`;
 
-console.log(`\n✅ Baked ${Object.keys(baked).length} config values into binary`);
-console.log(`📦 Running pkg for ${target}…\n`);
+// Two editions from the same source (see src/edition.js):
+//   full — the admin app with the automatic event settings
+//   lite — hosting and active nodes only, for the other hosts
+const EDITIONS = [
+  { name: 'full', exeName: 'bdo-raid-helper.exe', extra: {} },
+  { name: 'lite', exeName: 'bdo-raid-helper-lite.exe', extra: { BDO_EDITION: 'lite' } },
+];
 
-try {
-  execSync(`npx pkg . --out-path dist --targets ${target}`, { stdio: 'inherit' });
+function sleepOneSecond() {
+  execSync('ping 127.0.0.1 -n 2 > nul'); // ~1 s delay without requiring sleep
+}
+
+function buildOne({ name, exeName, extra }) {
+  const values = { ...baked, ...extra };
+  // Write temporary baked-config.js — pkg will bundle this into the binary
+  fs.writeFileSync(
+    BAKED,
+    `// Auto-generated at build time — do not edit\nmodule.exports = ${JSON.stringify(values, null, 2)};\n`,
+    'utf8'
+  );
+
+  const exePath = path.join('dist', platform === 'win' ? exeName : exeName.replace(/\.exe$/, ''));
+  console.log(`\n✅ Baked ${Object.keys(values).length} config values into the ${name} edition`);
+  console.log(`📦 Running pkg for ${target} → ${exePath}…\n`);
+
+  try {
+    execSync(`npx pkg . --output "${exePath}" --targets ${target}`, { stdio: 'inherit' });
+  } finally {
+    // Always clean up the temp file, even if pkg fails
+    fs.unlinkSync(BAKED);
+  }
 
   // Patch the PE header: change Windows subsystem from Console (3) to GUI (2).
   // A GUI-subsystem exe never allocates a console window — no runtime hiding needed.
   // Both PE32 and PE32+ have the Subsystem WORD at OptionalHeader + 0x44,
   // which is peOffset + 4 (sig) + 20 (FileHeader) + 0x44 = peOffset + 0x5C.
   if (platform === 'win') {
-    const exeName = 'bdo-raid-helper.exe';
-    const exePath = require('path').join('dist', exeName);
     // Windows Defender may briefly lock the file after pkg writes it.
     // Retry up to 5 times with 1-second gaps before giving up.
     let buf;
@@ -85,7 +104,7 @@ try {
       } catch (e) {
         if (attempt === 5) throw e;
         console.log(`  Waiting for file lock to release (attempt ${attempt}/5)…`);
-        execSync('ping 127.0.0.1 -n 2 > nul'); // ~1 s delay without requiring sleep
+        sleepOneSecond();
       }
     }
     const peOff  = buf.readUInt32LE(0x3C);
@@ -99,7 +118,7 @@ try {
         } catch (e) {
           if (attempt === 5) throw e;
           console.log(`  Waiting for write lock to release (attempt ${attempt}/5)…`);
-          execSync('ping 127.0.0.1 -n 2 > nul');
+          sleepOneSecond();
         }
       }
       console.log(`✅ Patched ${exeName}: subsystem Console → GUI (no console window)`);
@@ -110,16 +129,14 @@ try {
   // that works fine in the dev Node version.
   if (platform === 'win') {
     try {
-      execSync(`"${require('path').join('dist', 'bdo-raid-helper.exe')}" --self-test`, { stdio: 'inherit' });
-      console.log('✅ Packaged exe self-test passed');
+      execSync(`"${exePath}" --self-test`, { stdio: 'inherit' });
+      console.log(`✅ ${exeName} self-test passed`);
     } catch (e) {
-      console.error(`\n❌ Packaged exe self-test failed (exit ${e.status}). Do not ship this build.`);
+      console.error(`\n❌ ${exeName} self-test failed (exit ${e.status}). Do not ship this build.`);
       process.exitCode = 1;
     }
   }
-
-  console.log('\n✅ Build complete — binaries are in dist/');
-} finally {
-  // Always clean up the temp file, even if pkg fails
-  fs.unlinkSync(BAKED);
 }
+
+for (const e of EDITIONS) buildOne(e);
+console.log('\n✅ Build complete — binaries are in dist/');

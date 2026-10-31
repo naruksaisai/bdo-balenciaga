@@ -6,6 +6,7 @@
   "bin": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
+    "start:lite": "node src/main.js --lite",
     "deploy": "node src/commands/deploy.js",
     "build": "node build.js",
     "test": "node --test \"test/**/*.test.js\""

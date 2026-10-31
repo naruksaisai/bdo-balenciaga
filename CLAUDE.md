@@ -12,9 +12,10 @@ compiled at runtime by Windows PowerShell 5.1 `Add-Type` — no extra framework.
 | [src/hosting.js](src/hosting.js) | Hosting ON/OFF lifecycle (`start`/`stop`, status `{state, role, detail, error}`). Owns the leader's Discord client; cancellable login retry with 10/30/60/120/300 s backoff. |
 | [src/ha/coordinator.js](src/ha/coordinator.js) | Leader election via a Discord coordination channel. Restartable (`start`/`shutdown`, `_running` guards every async callback). Emits `role`, `promote`. |
 | [src/ha/nodeStatus.js](src/ha/nodeStatus.js) | Pure parser: coord-channel messages → active/stale node counts. Shared by coordinator and UI monitor. |
-| [src/settings/](src/settings/) | `schema.js` (keys, validation, precedence — pure), `settingsStore.js` (`settings.json`, hosting choice), `environment.js` (baked/env/.env/legacy config.json), `migrate.js`, `effects.js` (what a saved change does), `emojiCheck.js` (custom emoji usable by the bot?). |
+| [src/edition.js](src/edition.js) | `full` vs `lite` (hosting + active nodes only). Baked `BDO_EDITION=lite` or `--lite`. Lite UI skips the settings group; controller refuses `saveSettings`. |
+| [src/settings/](src/settings/) | `schema.js` (keys, validation, precedence — pure; per-role `*_MAX`/`*_EMOJI` keys only seed roles), `roles.js` (role list validation, key slugs, repair — pure), `settingsStore.js` (`settings.json`, hosting choice), `environment.js` (baked/env/.env/legacy config.json), `migrate.js`, `effects.js` (what a saved change does), `emojiCheck.js` (custom emoji usable by the bot?). |
 | [src/desktop/](src/desktop/) | `uiProcess.js` (spawns PS, bootstrap, framing), `TrayApp.cs` (the whole UI), `ipc.js` (message whitelist), `controller.js` (UI requests → backend), `statusView.js` (display text), `nodeMonitor.js`, `singleInstance.js`, `autostart.js`, `app.js` (UI supervision/restart). |
-| [src/scheduler/](src/scheduler/) | `scheduleConfig.js` (per-day schedule, `schedule.json`), `autoEvent.js` (`startAutoEvent`/`stopAutoEvent`). |
+| [src/scheduler/](src/scheduler/) | `scheduleConfig.js` (per-day schedule + `roles` list, `schedule.json`, HA-synced), `autoEvent.js` (`startAutoEvent`/`stopAutoEvent`). Events snapshot `roles`; `eventStore.eventRoles()` falls back to the 5 built-ins for older events. |
 | [src/utils/dataDir.js](src/utils/dataDir.js) | Per-user data dir: `%LOCALAPPDATA%\BDO Raid Helper` (packaged), `./.data` (dev), `BDO_DATA_DIR` override. ALL mutable files go here. |
 | [src/utils/baseDir.js](src/utils/baseDir.js) | exe dir (packaged) / cwd (dev). Only for reading `.env`, legacy files. Never write here. |
 | [build.js](build.js) | Bakes env vars into binary, runs pkg, patches PE Console→GUI. Retries on Defender lock. |
@@ -24,7 +25,8 @@ compiled at runtime by Windows PowerShell 5.1 `Add-Type` — no extra framework.
 ```bash
 npm start              # dev: .env from cwd, data in ./.data, window + tray
 npm test               # node:test; Windows-only tests compile TrayApp.cs via real PS 5.1
-npm run build          # dist/bdo-raid-helper.exe (TrayApp.cs + icon.ico are pkg assets)
+npm run start:lite     # same, lite edition
+npm run build          # dist/bdo-raid-helper.exe + bdo-raid-helper-lite.exe (TrayApp.cs + icon.ico are pkg assets)
 node src/commands/deploy.js   # re-register slash commands
 ```
 
@@ -62,7 +64,7 @@ Run the app in a scratch cwd (no `.env`) to test the UI without touching the rea
 - **`[Action]{ ... }` scriptblock casts fail silently** against `Add-Type` C# in PS 5.1. Use C# events / keep logic in C#.
 - **First `ShowWindow` in the PS process gets the launcher's `SW_HIDE`** (`-WindowStyle Hidden` + `windowsHide`). `TrayApp.Run` spends it on the sink form; otherwise the main window never appears.
 - **A detached `powershell.exe` exits immediately** (no console). The UI must be a normal child → it lives in libuv's kill-on-close job object and dies with Node (no orphans). Error boxes that must outlive Node are launched as a grandchild via `Start-Process` (silent job breakaway).
-- **`WM_CLOSE` from outside has `CloseReason.None`**, not `UserClosing`. The main window cancels every close except `AllowClose`/`WindowsShutDown`.
+- **`WM_CLOSE` from outside has `CloseReason.None`**, not `UserClosing`. The main window cancels every close except `AllowClose`/`WindowsShutDown`; then hosting ON → hide to tray, hosting OFF → `RequestExit` (graceful quit). The tray icon is visible only while hosting is ON.
 - **`@discordjs/rest` clears its token after a 401**; later calls say "Expected token to be set…". Map both to "token rejected" ([discordErrors.js](src/utils/discordErrors.js)).
 - **Node `WriteStream` open on a log file** blocks .NET `File.AppendAllText`.
 - **Windows Defender briefly locks the new exe** after pkg writes — `build.js` retries.

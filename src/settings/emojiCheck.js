@@ -1,17 +1,17 @@
 const { Routes } = require('discord.js');
 const { parseEmoji } = require('../utils/emoji');
-const { POOLS } = require('./schema');
 const { describeDiscordError } = require('../utils/discordErrors');
 
 const MAX_GUILDS_CHECKED = 10;
 
 // A bot can react with a custom emoji only if it is in that emoji's server.
 // Checks the event channel's server first, then the bot's other servers.
+// entries: [{ key, emoji }] — key is the UI field the error belongs to.
 // Returns { errors: { KEY: msg }, warnings: [msg] }. Network failures become a
 // warning (the emoji is saved unverified) rather than blocking the save.
-async function checkCustomEmojis(values, { rest, eventChannelId }) {
-  const custom = POOLS
-    .map((p) => ({ key: p.emojiKey, label: p.label, parsed: parseEmoji(values[p.emojiKey]) }))
+async function checkCustomEmojis(entries, { rest, eventChannelId }) {
+  const custom = entries
+    .map((e) => ({ key: e.key, parsed: parseEmoji(e.emoji) }))
     .filter((e) => e.parsed && e.parsed.kind === 'custom');
   if (!custom.length) return { errors: {}, warnings: [] };
   if (!rest) return { errors: {}, warnings: ['Custom emojis could not be verified (no Discord connection in this build).'] };

@@ -3,32 +3,49 @@
 // whitelist before the controller sees it; anything else is dropped.
 const { redact } = require('../utils/logger');
 const { KEYS } = require('../settings/schema');
+const { MAX_ROLES } = require('../settings/roles');
 
 const MAX_LINE_BYTES = 64 * 1024;
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 const isBool = (v) => typeof v === 'boolean';
 const isId = (v) => Number.isInteger(v) && v > 0 && v < 2 ** 31;
+const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isShortString = (max) => (v) => typeof v === 'string' && v.length <= max;
+const isNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 
 // type → { request: needs a numeric id and gets a response, fields: validators }
 const UI_MESSAGES = {
   ready:        { request: false, fields: {} },
   getSettings:  { request: true,  fields: {} },
-  saveSettings: { request: true,  fields: { settings: isSettingsPayload } },
+  saveSettings: { request: true,  fields: { settings: isSettingsPayload, roles: isRolesPayload, days: isDaysPayload } },
   setHosting:   { request: true,  fields: { enabled: isBool } },
   refreshNodes: { request: true,  fields: {} },
+  createEventNow: { request: true, fields: {} },
   visibility:   { request: false, fields: { visible: isBool } },
   exit:         { request: false, fields: {} },
   endSession:   { request: false, fields: {} },
   log:          { request: false, fields: { level: (v) => ['info', 'warn', 'error'].includes(v), message: (v) => typeof v === 'string' && v.length <= 2000 } },
 };
 
-// Shape check only (known keys, primitive values); semantic validation happens
-// in settings/schema so the UI gets per-field error messages.
+// Shape checks only (known keys, primitive values); semantic validation happens
+// in settings/schema and settings/roles so the UI gets per-field error messages.
 function isSettingsPayload(v) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  if (!isObject(v)) return false;
   return Object.entries(v).every(([k, val]) =>
-    KEYS.includes(k) &&
-    (typeof val === 'string' ? val.length <= 5000 : typeof val === 'number' && Number.isFinite(val)));
+    KEYS.includes(k) && (typeof val === 'string' ? val.length <= 5000 : isNumber(val)));
+}
+
+const ROLE_FIELDS = { key: isShortString(40), label: isShortString(100), emoji: isShortString(100), max: isNumber };
+function isRolesPayload(v) {
+  return Array.isArray(v) && v.length <= MAX_ROLES && v.every((r) =>
+    isObject(r) &&
+    Object.keys(r).length === Object.keys(ROLE_FIELDS).length &&
+    Object.entries(ROLE_FIELDS).every(([k, check]) => Object.prototype.hasOwnProperty.call(r, k) && check(r[k])));
+}
+
+function isDaysPayload(v) {
+  return isObject(v) && Object.keys(v).length === DAYS.length && DAYS.every((d) => isBool(v[d]));
 }
 
 // Returns { ok:true, message } or { ok:false, error, id? } (id when the bad

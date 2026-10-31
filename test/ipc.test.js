@@ -6,7 +6,41 @@ const { redact } = require('../src/utils/logger');
 test('accepts whitelisted messages', () => {
   assert.equal(parseUiMessage('{"type":"ready"}').ok, true);
   assert.equal(parseUiMessage('{"type":"setHosting","id":3,"enabled":true}').ok, true);
-  assert.equal(parseUiMessage(JSON.stringify({ type: 'saveSettings', id: 1, settings: { AUTO_EVENT_TITLE: 'x', AUTO_EVENT_FLEX_MAX: 5 } })).ok, true);
+  assert.equal(parseUiMessage(JSON.stringify(saveMsg())).ok, true);
+  assert.equal(parseUiMessage('{"type":"createEventNow","id":2}').ok, true);
+  assert.equal(parseUiMessage('{"type":"createEventNow","id":2,"title":"x"}').ok, false);
+  assert.equal(parseUiMessage('{"type":"createEventNow"}').ok, false, 'needs an id');
+});
+
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+function saveMsg(o = {}) {
+  return {
+    type: 'saveSettings',
+    id: 1,
+    settings: { AUTO_EVENT_TITLE: 'x', DONKEY_EMOJI: '🐴' },
+    roles: [{ key: 'mainball', label: 'Mainball', emoji: '⚔️', max: 20 }, { key: '', label: 'New', emoji: '🏹', max: 5 }],
+    days: Object.fromEntries(DAYS.map((d) => [d, d !== 'friday'])),
+    ...o,
+  };
+}
+
+test('saveSettings roles and days must have the exact shape', () => {
+  const role = { key: 'k', label: 'L', emoji: '🏹', max: 5 };
+  const days = saveMsg().days;
+  const bad = [
+    { roles: undefined },
+    { roles: 'mainball' },
+    { roles: [{ key: 'k', label: 'L', emoji: '🏹' }] },                       // missing max
+    { roles: [{ ...role, extra: 1 }] },                                        // unknown field
+    { roles: [{ ...role, label: { x: 1 } }] },
+    { roles: [{ ...role, label: 'x'.repeat(101) }] },
+    { roles: Array.from({ length: 21 }, () => role) },                         // over the role limit
+    { days: undefined },
+    { days: { ...days, funday: true } },
+    { days: { ...days, friday: 'no' } },
+    { days: Object.fromEntries(Object.entries(days).slice(1)) },              // a day missing
+  ];
+  for (const o of bad) assert.equal(parseUiMessage(JSON.stringify(saveMsg(o))).ok, false, JSON.stringify(o).slice(0, 80));
 });
 
 test('rejects malformed, unknown and out-of-shape messages', () => {

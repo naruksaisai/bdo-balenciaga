@@ -118,3 +118,37 @@ test('after a 401 the cleared-token error still reads as a rejected token', () =
   assert.equal(describeDiscordError(Object.assign(new Error('x'), { status: 401 })), 'Discord rejected the bot token.');
   assert.match(describeDiscordError(Object.assign(new Error('x'), { code: 'ENOTFOUND' })), /unreachable \(ENOTFOUND\)/);
 });
+
+test('status view: role badge and next event for leader, standby and off', () => {
+  const at = new Date(2026, 9, 31, 0, 23).getTime(); // Sat 31 Oct 00:23 local
+  const base = { hostingEnabled: true, connection, monitor: { loading: true } };
+  const leader = buildStatusView({ ...base, hosting: { state: 'running', role: 'leader', detail: '', error: null },
+    autoEvent: { state: 'scheduled', at, dayName: 'saturday', time: '00:23' }, now: at - (21 * 60 + 50) * 60000 });
+  assert.equal(leader.hosting.roleLevel, 'leader');
+  assert.match(leader.hosting.roleExplain, /posts the events/);
+  assert.equal(leader.hosting.nextEvent, 'Sat 31 Oct, 00:23 (in 21 h 50 min)');
+  assert.equal(leader.hosting.canCreateEvent, true);
+  assert.equal(leader.hosting.createEventHint, '');
+
+  const idle = buildStatusView({ ...base, hosting: { state: 'running', role: 'leader', detail: '', error: null },
+    autoEvent: { state: 'idle', reason: 'Automatic events are disabled in this build (AUTO_EVENT_ENABLED).' }, now: at });
+  assert.match(idle.hosting.nextEvent, /disabled in this build/);
+
+  const standby = buildStatusView({ ...base, hosting: { state: 'running', role: 'standby', detail: '', error: null }, autoEvent: null, now: at });
+  assert.equal(standby.hosting.roleLevel, 'standby');
+  assert.match(standby.hosting.nextEvent, /leader PC/);
+  assert.equal(standby.hosting.canCreateEvent, false);
+  assert.match(standby.hosting.createEventHint, /leader PC/);
+
+  const off = buildStatusView({ ...base, hostingEnabled: false, hosting: { state: 'stopped', role: 'off', detail: '', error: null }, autoEvent: null, now: at });
+  assert.equal(off.hosting.roleLevel, 'off');
+  assert.equal(off.hosting.canCreateEvent, false);
+});
+
+test('auto-event duplicate guard is keyed by local date and time, not UTC date', () => {
+  const { slotKey } = require('../src/scheduler/autoEvent');
+  const evening = new Date(2026, 9, 30, 21, 30);
+  const later = new Date(2026, 9, 30, 22, 0);
+  assert.equal(slotKey(evening, '21:30'), '2026-10-30 21:30');
+  assert.notEqual(slotKey(evening, '21:30'), slotKey(later, '22:00'), 'moving today\'s time later is a new slot');
+});

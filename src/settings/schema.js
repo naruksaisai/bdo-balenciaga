@@ -1,15 +1,20 @@
 // User-editable settings: keys, defaults, validation and precedence. Pure — no
 // file or Discord access — so it can be unit tested directly.
+//
+// Roles (pools) are not settings any more: they live in schedule.json so they
+// sync to standby nodes (see settings/roles.js). The per-role keys below remain
+// only as the source of the built-in roles' defaults (build env, .env, and
+// values saved by older versions) when schedule.json has no role list yet.
 const { parseEmoji } = require('../utils/emoji');
 
 const POOLS = [
-  { key: 'mainball',  label: 'Mainball',          maxKey: 'AUTO_EVENT_MAINBALL_MAX',  emojiKey: 'MAINBALL_EMOJI',  defaultMax: 20, defaultEmoji: '⚔️' },
-  { key: 'def-team',  label: 'Def Team',          maxKey: 'AUTO_EVENT_DEF_TEAM_MAX',  emojiKey: 'DEF_TEAM_EMOJI',  defaultMax: 10, defaultEmoji: '🛡️' },
-  { key: 'commander', label: 'Commander',         maxKey: 'AUTO_EVENT_COMMANDER_MAX', emojiKey: 'COMMANDER_EMOJI', defaultMax: 2,  defaultEmoji: '👑' },
-  { key: 'shai',      label: 'Shai',              maxKey: 'AUTO_EVENT_SHAI_MAX',      emojiKey: 'SHAI_EMOJI',      defaultMax: 3,  defaultEmoji: '🎵' },
-  { key: 'flex',      label: 'Flex',              maxKey: 'AUTO_EVENT_FLEX_MAX',      emojiKey: 'FLEX_EMOJI',      defaultMax: 5,  defaultEmoji: '🔄' },
-  { key: 'donkey',    label: 'Donkey (Overflow)', maxKey: null,                       emojiKey: 'DONKEY_EMOJI',    defaultMax: null, defaultEmoji: '🐴' },
+  { key: 'mainball',  label: 'Mainball',  maxKey: 'AUTO_EVENT_MAINBALL_MAX',  emojiKey: 'MAINBALL_EMOJI',  defaultMax: 20, defaultEmoji: '⚔️' },
+  { key: 'def-team',  label: 'Def Team',  maxKey: 'AUTO_EVENT_DEF_TEAM_MAX',  emojiKey: 'DEF_TEAM_EMOJI',  defaultMax: 10, defaultEmoji: '🛡️' },
+  { key: 'commander', label: 'Commander', maxKey: 'AUTO_EVENT_COMMANDER_MAX', emojiKey: 'COMMANDER_EMOJI', defaultMax: 2,  defaultEmoji: '👑' },
+  { key: 'shai',      label: 'Shai',      maxKey: 'AUTO_EVENT_SHAI_MAX',      emojiKey: 'SHAI_EMOJI',      defaultMax: 3,  defaultEmoji: '🎵' },
+  { key: 'flex',      label: 'Flex',      maxKey: 'AUTO_EVENT_FLEX_MAX',      emojiKey: 'FLEX_EMOJI',      defaultMax: 5,  defaultEmoji: '🔄' },
 ];
+const DONKEY = { key: 'donkey', label: 'Donkey (Overflow)', emojiKey: 'DONKEY_EMOJI', defaultEmoji: '🐴' };
 
 // Offered in the emoji drop-downs; any other Unicode or custom emoji can be typed or pasted.
 const BUILTIN_EMOJIS = [
@@ -25,15 +30,20 @@ const DEFAULTS = {
   AUTO_EVENT_SCHEDULE: '21:30',
   AUTO_EVENT_TITLE: 'Guild Raid Signup',
   AUTO_EVENT_DESCRIPTION: "React to join your pool for today's raid",
+  DONKEY_EMOJI: DONKEY.defaultEmoji,
 };
+
+const LEGACY_ROLE_DEFAULTS = {};
 for (const p of POOLS) {
-  if (p.maxKey) DEFAULTS[p.maxKey] = p.defaultMax;
-  DEFAULTS[p.emojiKey] = p.defaultEmoji;
+  LEGACY_ROLE_DEFAULTS[p.maxKey] = p.defaultMax;
+  LEGACY_ROLE_DEFAULTS[p.emojiKey] = p.defaultEmoji;
 }
 
 const KEYS = Object.keys(DEFAULTS);
-const EMOJI_KEYS = POOLS.map((p) => p.emojiKey);
-const MAX_KEYS = POOLS.filter((p) => p.maxKey).map((p) => p.maxKey);
+const LEGACY_ROLE_KEYS = Object.keys(LEGACY_ROLE_DEFAULTS);
+const ALL_KEYS = [...KEYS, ...LEGACY_ROLE_KEYS];
+const EMOJI_KEYS = [...POOLS.map((p) => p.emojiKey), DONKEY.emojiKey];
+const MAX_KEYS = POOLS.map((p) => p.maxKey);
 
 function normalizeTime(value) {
   if (typeof value !== 'string') return null;
@@ -45,8 +55,22 @@ function normalizeTime(value) {
   return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
-// Validates one key. `value` may come from the UI (typed) or from env (string).
-// Returns { value } or { error }.
+function validateMax(value) {
+  const n = typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : value;
+  if (!Number.isInteger(n) || n < 1 || n > POOL_MAX_LIMIT) {
+    return { error: `Enter a whole number from 1 to ${POOL_MAX_LIMIT}.` };
+  }
+  return { value: n };
+}
+
+function validateEmoji(value) {
+  const parsed = parseEmoji(value);
+  if (!parsed) return { error: 'Enter a single Unicode emoji or a Discord custom emoji like <:name:123456789012345678>.' };
+  return { value: parsed.value };
+}
+
+// Validates one key (current or legacy role key). `value` may come from the UI
+// (typed) or from env (string). Returns { value } or { error }.
 function validateField(key, value) {
   if (key === 'AUTO_EVENT_SCHEDULE') {
     const t = normalizeTime(value);
@@ -63,23 +87,9 @@ function validateField(key, value) {
     if (v.length > DESCRIPTION_MAX) return { error: `Description must be at most ${DESCRIPTION_MAX} characters.` };
     return { value: v };
   }
-  if (MAX_KEYS.includes(key)) {
-    const n = typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : value;
-    if (!Number.isInteger(n) || n < 1 || n > POOL_MAX_LIMIT) {
-      return { error: `Enter a whole number from 1 to ${POOL_MAX_LIMIT}.` };
-    }
-    return { value: n };
-  }
-  if (EMOJI_KEYS.includes(key)) {
-    const parsed = parseEmoji(value);
-    if (!parsed) return { error: 'Enter a single Unicode emoji or a Discord custom emoji like <:name:123456789012345678>.' };
-    return { value: parsed.value };
-  }
+  if (MAX_KEYS.includes(key)) return validateMax(value);
+  if (EMOJI_KEYS.includes(key)) return validateEmoji(value);
   return { error: 'Unknown setting.' };
-}
-
-function poolLabelForEmojiKey(key) {
-  return POOLS.find((p) => p.emojiKey === key).label;
 }
 
 // Validates a complete settings object from the UI.
@@ -102,16 +112,6 @@ function validateSettings(input) {
     if (r.error) errors[key] = r.error;
     else value[key] = r.value;
   }
-
-  // Two pools sharing an emoji would make reactions ambiguous.
-  const seen = new Map();
-  for (const key of EMOJI_KEYS) {
-    if (!(key in value)) continue;
-    const k = parseEmoji(value[key]).key;
-    if (seen.has(k)) errors[key] = `Same emoji as ${poolLabelForEmojiKey(seen.get(k))}.`;
-    else seen.set(k, key);
-  }
-
   return Object.keys(errors).length ? { ok: false, errors } : { ok: true, value };
 }
 
@@ -119,13 +119,13 @@ function validateSettings(input) {
 //   1. saved     — values the user saved in the desktop UI (settings.json)
 //   2. env       — real environment, then baked build values, then .env, then
 //                  legacy config.json (see config loader)
-//   3. DEFAULTS
+//   3. defaults
 // Invalid values at any level fall through to the next one with a warning.
-function resolveSettings({ saved = {}, env = {} } = {}) {
+function resolveKeys(keys, defaults, { saved = {}, env = {} }) {
   const values = {};
   const sources = {};
   const warnings = [];
-  for (const key of KEYS) {
+  for (const key of keys) {
     if (saved[key] !== undefined) {
       const r = validateField(key, saved[key]);
       if (!r.error) { values[key] = r.value; sources[key] = 'saved'; continue; }
@@ -136,38 +136,25 @@ function resolveSettings({ saved = {}, env = {} } = {}) {
       if (!r.error) { values[key] = r.value; sources[key] = 'environment'; continue; }
       warnings.push(`${key} from the build/environment is invalid (${r.error}); using the default.`);
     }
-    values[key] = DEFAULTS[key];
+    values[key] = defaults[key];
     sources[key] = 'default';
-  }
-  // Duplicate emojis across levels (e.g. one saved, one from env) — fall back
-  // to defaults for the later duplicates so reactions stay unambiguous.
-  const seen = new Set();
-  for (const key of EMOJI_KEYS) {
-    const k = parseEmoji(values[key]).key;
-    if (seen.has(k)) {
-      warnings.push(`${key} duplicates another pool's emoji; using the default.`);
-      values[key] = DEFAULTS[key];
-      sources[key] = 'default';
-    }
-    seen.add(parseEmoji(values[key]).key);
   }
   return { values, sources, warnings };
 }
 
-// Effective settings → the shapes the bot code uses.
-function toEmojiMap(values) {
-  const out = {};
-  for (const p of POOLS) out[p.key] = values[p.emojiKey];
-  return out;
+function resolveSettings({ saved = {}, env = {} } = {}) {
+  return resolveKeys(KEYS, DEFAULTS, { saved, env });
 }
 
-function toPoolLimits(values) {
-  const out = {};
-  for (const p of POOLS) if (p.maxKey) out[p.key] = values[p.maxKey];
-  return out;
+// The five built-in roles with max/emoji taken from saved (older versions),
+// env/baked, or defaults. Seeds schedule.json's role list on first run.
+function resolveLegacyRoles({ saved = {}, env = {} } = {}) {
+  const { values } = resolveKeys(LEGACY_ROLE_KEYS, LEGACY_ROLE_DEFAULTS, { saved, env });
+  return POOLS.map((p) => ({ key: p.key, label: p.label, emoji: values[p.emojiKey], max: values[p.maxKey] }));
 }
 
 module.exports = {
-  POOLS, BUILTIN_EMOJIS, DEFAULTS, KEYS, EMOJI_KEYS, MAX_KEYS, POOL_MAX_LIMIT,
-  normalizeTime, validateField, validateSettings, resolveSettings, toEmojiMap, toPoolLimits,
+  POOLS, DONKEY, BUILTIN_EMOJIS, DEFAULTS, KEYS, ALL_KEYS, LEGACY_ROLE_KEYS, LEGACY_ROLE_DEFAULTS,
+  EMOJI_KEYS, MAX_KEYS, POOL_MAX_LIMIT,
+  normalizeTime, validateField, validateMax, validateEmoji, validateSettings, resolveSettings, resolveLegacyRoles,
 };

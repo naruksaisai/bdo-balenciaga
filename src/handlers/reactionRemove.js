@@ -12,7 +12,7 @@ module.exports = async (reaction, user) => {
   const event = getEvent(reaction.message.id);
   if (!event) return;
 
-  const pool = getPoolFromEmoji(reaction.emoji, event.emojis);
+  const pool = getPoolFromEmoji(reaction.emoji, event);
   if (!pool) return;
 
   // Only process removal if the reaction matches the user's selected pool
